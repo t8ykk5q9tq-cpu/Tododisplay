@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Display Board</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Todo List -->
+        <div class="list-panel">
+            <h1>Todo List</h1>
+            <form class="add-form" data-list="todo">
+                <input type="text" placeholder="Add a task..." autocomplete="off">
+                <button type="submit">+</button>
+            </form>
+            <ul class="item-list" id="todo-list"></ul>
+            <button class="clear-btn" data-list="todo">Clear completed</button>
+        </div>
+
+        <!-- Shopping List -->
+        <div class="list-panel">
+            <h1>Shopping List</h1>
+            <form class="add-form" data-list="shopping">
+                <input type="text" placeholder="Add an item..." autocomplete="off">
+                <button type="submit">+</button>
+            </form>
+            <ul class="item-list" id="shopping-list"></ul>
+            <button class="clear-btn" data-list="shopping">Clear completed</button>
+        </div>
+    </div>
+
+    <div class="clock" id="clock"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

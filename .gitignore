@@ -1,0 +1,11 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Local database (don't sync your list data)
+lists.db
+
+# OS / editor cruft
+.DS_Store
+*.swp

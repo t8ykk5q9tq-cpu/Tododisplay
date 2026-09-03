@@ -1,0 +1,17 @@
+[Unit]
+Description=Todo Display Board
+After=network.target graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Tododisplay
+ExecStart=/home/pi/Tododisplay/start.sh
+ExecStop=/home/pi/Tododisplay/stop.sh
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical.target
