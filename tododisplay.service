@@ -5,10 +5,10 @@ Wants=graphical.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/Tododisplay
-ExecStart=/home/pi/Tododisplay/start.sh
-ExecStop=/home/pi/Tododisplay/stop.sh
+User=matt
+WorkingDirectory=/home/matt/Tododisplay
+ExecStart=/home/matt/Tododisplay/start.sh
+ExecStop=/home/matt/Tododisplay/stop.sh
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0

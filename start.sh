@@ -42,18 +42,34 @@ for i in $(seq 1 20); do
     sleep 0.5
 done
 
+# Detect the Chromium command (varies by OS version):
+#   - Raspberry Pi OS Bookworm and newer: "chromium"
+#   - Older versions:                      "chromium-browser"
+if command -v chromium >/dev/null 2>&1; then
+    CHROMIUM="chromium"
+elif command -v chromium-browser >/dev/null 2>&1; then
+    CHROMIUM="chromium-browser"
+else
+    echo "ERROR: Chromium is not installed."
+    echo "Install it with: sudo apt install -y chromium-browser"
+    echo "(The server is still running at http://localhost:5000 — you can open it in any browser.)"
+    CHROMIUM=""
+fi
+
 # Launch Chromium in kiosk mode (fullscreen, no UI)
-echo "Launching display..."
-DISPLAY=:0 chromium-browser \
-    --noerrdialogs \
-    --disable-infobars \
-    --kiosk \
-    --incognito \
-    --disable-translate \
-    --disable-features=TranslateUI \
-    --overscroll-history-navigation=0 \
-    --disable-pinch \
-    http://localhost:5000 &
+if [ -n "$CHROMIUM" ]; then
+    echo "Launching display with $CHROMIUM..."
+    DISPLAY=:0 "$CHROMIUM" \
+        --noerrdialogs \
+        --disable-infobars \
+        --kiosk \
+        --incognito \
+        --disable-translate \
+        --disable-features=TranslateUI \
+        --overscroll-history-navigation=0 \
+        --disable-pinch \
+        http://localhost:5000 &
+fi
 
 echo "Display is running. Server PID: $SERVER_PID"
 echo "To stop: ./stop.sh"
