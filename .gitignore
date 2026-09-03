@@ -9,3 +9,6 @@ lists.db
 # OS / editor cruft
 .DS_Store
 *.swp
+
+# Runtime log from update.sh
+update.log
