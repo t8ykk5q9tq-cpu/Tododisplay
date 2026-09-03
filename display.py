@@ -148,10 +148,11 @@ def main():
     fonts = {
         # Base font sizes on the SMALLER screen dimension so text fits the
         # (often narrow) columns instead of overflowing and getting truncated.
+        # Sizes reduced 25% from the earlier defaults (larger divisor = smaller text).
         # Override any size with env vars, e.g. TITLE_PT=60 ITEM_PT=40 CLOCK_PT=28
-        "title": make_font(int(os.environ.get("TITLE_PT", max(34, min(sw, sh) // 9))), bold=True),
-        "item": make_font(int(os.environ.get("ITEM_PT", max(24, min(sw, sh) // 14)))),
-        "clock": make_font(int(os.environ.get("CLOCK_PT", max(18, min(sw, sh) // 20)))),
+        "title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12))), bold=True),
+        "item": make_font(int(os.environ.get("ITEM_PT", max(18, min(sw, sh) // 19)))),
+        "clock": make_font(int(os.environ.get("CLOCK_PT", max(14, min(sw, sh) // 27)))),
     }
 
     clock = pygame.time.Clock()
