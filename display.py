@@ -91,11 +91,19 @@ def main():
     pygame.display.set_caption("List Display")
     sw, sh = screen.get_size()
 
-    # Scale fonts to the screen height so it's readable on any monitor size
+    # Scale fonts to the screen height so it's readable on any monitor size.
+    # Use pygame's bundled font (pygame.font.Font(None, ...)) instead of a system
+    # font: it needs no fontconfig/fc-list lookup, which is slow and can time out
+    # on low-power boards like the Pi Zero 2 W.
+    def make_font(size, bold=False):
+        f = pygame.font.Font(None, size)
+        f.set_bold(bold)
+        return f
+
     fonts = {
-        "title": pygame.font.SysFont("dejavusans", max(28, sh // 18), bold=True),
-        "item": pygame.font.SysFont("dejavusans", max(20, sh // 26)),
-        "clock": pygame.font.SysFont("dejavusans", max(16, sh // 34)),
+        "title": make_font(max(34, sh // 15), bold=True),
+        "item": make_font(max(24, sh // 22)),
+        "clock": make_font(max(18, sh // 30)),
     }
 
     clock = pygame.time.Clock()
