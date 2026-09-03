@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Todo Display
+Comment=Fullscreen todo/shopping list display
+Exec=/bin/bash -lc "cd /home/matt/Tododisplay && ROTATE=90 bash start-lite.sh"
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
