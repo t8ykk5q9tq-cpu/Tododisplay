@@ -27,6 +27,15 @@ CLOCK_COLOR = (110, 110, 120)
 
 REFRESH_SECONDS = 5            # how often to re-read the database
 
+# Rotation in degrees: 0 (landscape), 90, 180, or 270.
+# Set via env var, e.g.  ROTATE=90 ./start-lite.sh
+# 90/270 give a PORTRAIT (tall) layout. Use 90 vs 270 depending on which way
+# the monitor is physically turned.
+try:
+    ROTATE = int(os.environ.get("ROTATE", "0")) % 360
+except ValueError:
+    ROTATE = 0
+
 
 def read_items(list_type):
     """Read items for a list from the database. Returns [] if DB not ready."""
@@ -89,7 +98,19 @@ def main():
     # Fullscreen at the display's native resolution
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     pygame.display.set_caption("List Display")
-    sw, sh = screen.get_size()
+    screen_w, screen_h = screen.get_size()
+
+    # When rotating 90/270, we draw onto an off-screen "canvas" with swapped
+    # dimensions (portrait), then rotate it onto the physical screen at flip time.
+    if ROTATE in (90, 270):
+        canvas = pygame.Surface((screen_h, screen_w))  # portrait: tall & narrow
+    elif ROTATE == 180:
+        canvas = pygame.Surface((screen_w, screen_h))
+    else:
+        canvas = screen  # no rotation: draw straight to the screen
+
+    # All layout math uses the CANVAS dimensions (portrait when rotated).
+    sw, sh = canvas.get_size()
 
     # Scale fonts to the screen height so it's readable on any monitor size.
     # Use pygame's bundled font (pygame.font.Font(None, ...)) instead of a system
@@ -128,29 +149,45 @@ def main():
             shopping_items = read_items("shopping")
             last_refresh = now
 
-        # --- Draw ---
-        screen.fill(BG_COLOR)
+        # --- Draw (onto canvas) ---
+        canvas.fill(BG_COLOR)
 
         gap = 24
         margin = 24
         clock_h = fonts["clock"].get_height() + 20
-        # Side-by-side columns: each panel is narrow but uses the FULL screen
-        # height, so many more items fit down the length of each list.
-        panel_w = (sw - 2 * margin - gap) // 2
-        panel_h = sh - 2 * margin - clock_h
+        portrait = ROTATE in (90, 270)
 
-        draw_panel(screen, fonts,
-                   (margin, margin, panel_w, panel_h),
-                   "Todo List", todo_items)
-        draw_panel(screen, fonts,
-                   (margin + panel_w + gap, margin, panel_w, panel_h),
-                   "Shopping List", shopping_items)
+        if portrait:
+            # Tall screen: stack the two lists top/bottom, each full width.
+            panel_w = sw - 2 * margin
+            panel_h = (sh - 2 * margin - clock_h - gap) // 2
+            draw_panel(canvas, fonts,
+                       (margin, margin, panel_w, panel_h),
+                       "Todo List", todo_items)
+            draw_panel(canvas, fonts,
+                       (margin, margin + panel_h + gap, panel_w, panel_h),
+                       "Shopping List", shopping_items)
+        else:
+            # Wide screen: side-by-side full-height columns.
+            panel_w = (sw - 2 * margin - gap) // 2
+            panel_h = sh - 2 * margin - clock_h
+            draw_panel(canvas, fonts,
+                       (margin, margin, panel_w, panel_h),
+                       "Todo List", todo_items)
+            draw_panel(canvas, fonts,
+                       (margin + panel_w + gap, margin, panel_w, panel_h),
+                       "Shopping List", shopping_items)
 
         # Clock / date at the bottom
         stamp = time.strftime("%A, %B %d  \u2022  %I:%M %p")
         clock_surf = fonts["clock"].render(stamp, True, CLOCK_COLOR)
         clock_x = (sw - clock_surf.get_width()) // 2
-        screen.blit(clock_surf, (clock_x, sh - clock_h + 4))
+        canvas.blit(clock_surf, (clock_x, sh - clock_h + 4))
+
+        # Rotate the canvas onto the physical screen if needed.
+        if canvas is not screen:
+            rotated = pygame.transform.rotate(canvas, ROTATE)
+            screen.blit(rotated, (0, 0))
 
         pygame.display.flip()
         clock.tick(10)  # 10 FPS is plenty; keeps CPU/RAM usage low

@@ -52,10 +52,10 @@ done
 # If a desktop (X) is running, use it. Otherwise pygame draws to the framebuffer.
 echo "Starting display..."
 if [ -n "$DISPLAY" ] || [ -S /tmp/.X11-unix/X0 ]; then
-    DISPLAY="${DISPLAY:-:0}" $PYTHON display.py &
+    DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" $PYTHON display.py &
 else
     # No X server: use the Linux framebuffer directly (console mode).
-    SDL_VIDEODRIVER=fbcon SDL_FBDEV=/dev/fb0 $PYTHON display.py &
+    SDL_VIDEODRIVER=fbcon SDL_FBDEV=/dev/fb0 ROTATE="${ROTATE:-0}" $PYTHON display.py &
 fi
 DISPLAY_PID=$!
 
