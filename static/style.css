@@ -172,3 +172,71 @@ body {
     padding: 2rem;
     font-style: italic;
 }
+
+/* ---------------------------------------------------------------------------
+   Phone / narrow-screen layout.
+   The default layout above is tuned for the wide monitor. On phones we stack
+   the panels, allow the page to scroll, and enlarge tap targets.
+   --------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+    body {
+        /* Let the page grow and scroll instead of locking to the viewport. */
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+    }
+
+    .container {
+        /* Stack the two lists vertically. */
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding: 1rem;
+        overflow: visible;
+    }
+
+    .list-panel {
+        /* Let each panel size to its content rather than fighting for height. */
+        overflow: visible;
+        padding: 1rem;
+    }
+
+    .list-panel h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .item-list {
+        /* No inner scroll on phones; the whole page scrolls instead. */
+        overflow: visible;
+        padding-right: 0;
+    }
+
+    .item-list li {
+        /* Bigger, easier-to-tap rows. */
+        padding: 1rem;
+        font-size: 1.15rem;
+        margin-bottom: 0.6rem;
+    }
+
+    .item-list li .delete-btn {
+        /* Larger tap target for delete, and always visible on touch. */
+        font-size: 1.6rem;
+        padding: 0 0.75rem;
+        opacity: 0.8;
+    }
+
+    .add-form input {
+        /* 16px+ prevents iOS from auto-zooming when the field is focused. */
+        font-size: 16px;
+        padding: 0.9rem 1rem;
+    }
+
+    .add-form button {
+        padding: 0.9rem 1.4rem;
+    }
+
+    .clock {
+        font-size: 1rem;
+        padding: 1rem 0.5rem;
+    }
+}
