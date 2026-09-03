@@ -68,23 +68,47 @@ def draw_panel(screen, fonts, rect, title, items):
     screen.blit(title_surf, (title_x, y + pad))
 
     # Items
+    item_font = fonts["item"]
     line_y = y + pad + title_surf.get_height() + 20
-    line_height = fonts["item"].get_height() + 16
+    line_height = item_font.get_height() + 10
+    max_w = w - 2 * pad
+    bottom = y + h - pad
+
+    def wrap(text, indent_w):
+        """Split text into lines that fit within (max_w - indent_w)."""
+        avail = max_w - indent_w
+        words = text.split(" ")
+        lines = []
+        cur = ""
+        for word in words:
+            trial = word if not cur else cur + " " + word
+            if item_font.size(trial)[0] <= avail or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        return lines
+
     for item in items:
-        if line_y + line_height > y + h - pad:
+        if line_y + line_height > bottom:
             break  # ran out of vertical space in this panel
         color = DONE_COLOR if item["done"] else TEXT_COLOR
         prefix = "\u2713 " if item["done"] else "\u2022 "
-        text = prefix + item["text"]
-        # Truncate overly long lines to fit the panel width
-        max_w = w - 2 * pad
-        rendered = fonts["item"].render(text, True, color)
-        if rendered.get_width() > max_w:
-            while rendered.get_width() > max_w and len(text) > 4:
-                text = text[:-2]
-                rendered = fonts["item"].render(text + "\u2026", True, color)
-        screen.blit(rendered, (x + pad, line_y))
-        line_y += line_height
+        prefix_w = item_font.size(prefix)[0]
+
+        wrapped = wrap(item["text"], prefix_w)
+        for i, ln in enumerate(wrapped):
+            if line_y + line_height > bottom:
+                break
+            if i == 0:
+                prefix_surf = item_font.render(prefix, True, color)
+                screen.blit(prefix_surf, (x + pad, line_y))
+            # Continuation lines are indented to align under the text.
+            text_surf = item_font.render(ln, True, color)
+            screen.blit(text_surf, (x + pad + prefix_w, line_y))
+            line_y += line_height
 
     if not items:
         empty_surf = fonts["item"].render("No items yet", True, DONE_COLOR)
@@ -122,9 +146,12 @@ def main():
         return f
 
     fonts = {
-        "title": make_font(max(34, sh // 15), bold=True),
-        "item": make_font(max(24, sh // 22)),
-        "clock": make_font(max(18, sh // 30)),
+        # Base font sizes on the SMALLER screen dimension so text fits the
+        # (often narrow) columns instead of overflowing and getting truncated.
+        # Override any size with env vars, e.g. TITLE_PT=60 ITEM_PT=40 CLOCK_PT=28
+        "title": make_font(int(os.environ.get("TITLE_PT", max(34, min(sw, sh) // 9))), bold=True),
+        "item": make_font(int(os.environ.get("ITEM_PT", max(24, min(sw, sh) // 14)))),
+        "clock": make_font(int(os.environ.get("CLOCK_PT", max(18, min(sw, sh) // 20)))),
     }
 
     clock = pygame.time.Clock()
