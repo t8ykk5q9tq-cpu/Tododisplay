@@ -134,15 +134,16 @@ def main():
         gap = 24
         margin = 24
         clock_h = fonts["clock"].get_height() + 20
-        # Stack the two panels vertically: full width, each half the height.
-        panel_w = sw - 2 * margin
-        panel_h = (sh - 2 * margin - clock_h - gap) // 2
+        # Side-by-side columns: each panel is narrow but uses the FULL screen
+        # height, so many more items fit down the length of each list.
+        panel_w = (sw - 2 * margin - gap) // 2
+        panel_h = sh - 2 * margin - clock_h
 
         draw_panel(screen, fonts,
                    (margin, margin, panel_w, panel_h),
                    "Todo List", todo_items)
         draw_panel(screen, fonts,
-                   (margin, margin + panel_h + gap, panel_w, panel_h),
+                   (margin + panel_w + gap, margin, panel_w, panel_h),
                    "Shopping List", shopping_items)
 
         # Clock / date at the bottom
