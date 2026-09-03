@@ -7,7 +7,7 @@
 //
 // SETUP: set PI_HOST to your Pi's Tailscale address or MagicDNS name.
 
-const PI_HOST = "100.101.102.103:5000"; // <-- CHANGE THIS (match ListWidget.js)
+const PI_HOST = "100.67.122.101:5000"; // Pi's Tailscale address
 const BASE_URL = `http://${PI_HOST}`;
 
 async function postItem(listType, text) {

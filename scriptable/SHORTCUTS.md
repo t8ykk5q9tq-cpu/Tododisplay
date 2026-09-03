@@ -3,8 +3,8 @@
 Add items to your lists from a home-screen icon. These talk to the Pi over
 Tailscale, so make sure the Tailscale app is on when away from home Wi-Fi.
 
-Replace `PI_HOST` everywhere with your Pi's Tailscale address or MagicDNS name,
-e.g. `100.101.102.103:5000` or `todoscreen:5000`.
+Your Pi's Tailscale address is `100.67.122.101:5000`. Use it in the URLs below
+(or a MagicDNS name like `todoscreen:5000` if you enable MagicDNS).
 
 ---
 
