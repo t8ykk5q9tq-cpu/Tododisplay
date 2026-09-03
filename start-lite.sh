@@ -63,5 +63,60 @@ echo "Running. Server PID: $SERVER_PID, Display PID: $DISPLAY_PID"
 echo "Add items from any device at: http://$(hostname -I | awk '{print $1}'):5000"
 echo "To stop: ./stop.sh  (or press Esc/Q on the Pi)"
 
+# --- Auto-update loop (Option 1: self-contained, no cron) ---
+# Every UPDATE_INTERVAL seconds, check GitHub for new code. If the commit
+# changed, pull it and restart the display by re-launching this script.
+# Disable by running with AUTO_UPDATE=0.
+AUTO_UPDATE="${AUTO_UPDATE:-1}"
+UPDATE_INTERVAL="${UPDATE_INTERVAL:-600}"   # 600s = 10 minutes
+LOG="$SCRIPT_DIR/update.log"
+
+update_loop() {
+    set +e   # tolerate transient failures (e.g. no network during a fetch)
+    while true; do
+        sleep "$UPDATE_INTERVAL"
+        # Trim the log so it never grows unbounded.
+        if [ -f "$LOG" ]; then
+            tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+        fi
+        echo "----- $(date) check -----" >> "$LOG"
+
+        BEFORE=$(git rev-parse HEAD 2>/dev/null)
+        # Fetch only (cheap) to see if remote moved, then pull if so.
+        git fetch >> "$LOG" 2>&1
+        LOCAL=$(git rev-parse HEAD 2>/dev/null)
+        REMOTE=$(git rev-parse '@{u}' 2>/dev/null)
+
+        if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
+            echo "New version found ($LOCAL -> $REMOTE). Updating." >> "$LOG"
+            git reset --hard >> "$LOG" 2>&1
+            git pull >> "$LOG" 2>&1
+            echo "Restarting display with new code." >> "$LOG"
+            # Relaunch this script (it kills existing instances on startup),
+            # preserving the current environment (ROTATE, etc.).
+            DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" \
+                nohup bash "$SCRIPT_DIR/start-lite.sh" >> "$LOG" 2>&1 &
+            # Stop this (old) instance; the new one takes over.
+            kill "$SERVER_PID" "$DISPLAY_PID" 2>/dev/null
+            exit 0
+        else
+            echo "No changes." >> "$LOG"
+        fi
+    done
+}
+
+if [ "$AUTO_UPDATE" = "1" ]; then
+    update_loop &
+    UPDATE_PID=$!
+    echo "Auto-update every ${UPDATE_INTERVAL}s (PID $UPDATE_PID)."
+fi
+
+# Clean up all child processes when this script is stopped.
+cleanup() {
+    kill "$UPDATE_PID" 2>/dev/null
+    kill "$SERVER_PID" "$DISPLAY_PID" 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
 # Keep the script alive while the server runs
 wait $SERVER_PID
