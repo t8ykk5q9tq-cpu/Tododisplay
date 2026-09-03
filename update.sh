@@ -8,6 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
 LOG="$SCRIPT_DIR/update.log"
+
+# Trim the log so it never grows without bound: keep only the last 200 lines.
+if [ -f "$LOG" ]; then
+    tail -n 200 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+
 echo "----- $(date) -----" >> "$LOG"
 
 # Record the current commit so we can tell if anything changed.
