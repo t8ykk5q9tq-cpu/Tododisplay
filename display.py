@@ -94,20 +94,35 @@ def draw_panel(screen, fonts, rect, title, items):
     for item in items:
         if line_y + line_height > bottom:
             break  # ran out of vertical space in this panel
-        color = DONE_COLOR if item["done"] else TEXT_COLOR
-        prefix = "\u2713 " if item["done"] else "\u2022 "
+        done = bool(item["done"])
+        color = DONE_COLOR if done else TEXT_COLOR
+        # Use a plain ASCII prefix ("- ") so it always renders. Done items get
+        # crossed off with a strikethrough line drawn across the text below.
+        prefix = "- "
         prefix_w = item_font.size(prefix)[0]
 
         wrapped = wrap(item["text"], prefix_w)
         for i, ln in enumerate(wrapped):
             if line_y + line_height > bottom:
                 break
+            row_start_x = x + pad
             if i == 0:
                 prefix_surf = item_font.render(prefix, True, color)
-                screen.blit(prefix_surf, (x + pad, line_y))
-            # Continuation lines are indented to align under the text.
+                screen.blit(prefix_surf, (row_start_x, line_y))
+            text_x = x + pad + prefix_w
             text_surf = item_font.render(ln, True, color)
-            screen.blit(text_surf, (x + pad + prefix_w, line_y))
+            screen.blit(text_surf, (text_x, line_y))
+
+            # Cross it off: draw a line through the whole row for done items.
+            if done:
+                text_h = item_font.get_height()
+                strike_y = line_y + text_h // 2
+                # First line: strike from the prefix; wrapped lines: from text.
+                strike_x1 = row_start_x if i == 0 else text_x
+                strike_x2 = text_x + text_surf.get_width()
+                pygame.draw.line(screen, DONE_COLOR,
+                                 (strike_x1, strike_y), (strike_x2, strike_y), 2)
+
             line_y += line_height
 
     if not items:
@@ -195,7 +210,7 @@ def main():
                    "Shopping List", shopping_items)
 
         # Clock / date at the bottom
-        stamp = time.strftime("%A, %B %d  \u2022  %I:%M %p")
+        stamp = time.strftime("%A, %B %d   -   %I:%M %p")
         clock_surf = fonts["clock"].render(stamp, True, CLOCK_COLOR)
         clock_x = (sw - clock_surf.get_width()) // 2
         canvas.blit(clock_surf, (clock_x, sh - clock_h + 4))
