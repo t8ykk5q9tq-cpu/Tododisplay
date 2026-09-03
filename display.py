@@ -155,28 +155,16 @@ def main():
         gap = 24
         margin = 24
         clock_h = fonts["clock"].get_height() + 20
-        portrait = ROTATE in (90, 270)
-
-        if portrait:
-            # Tall screen: stack the two lists top/bottom, each full width.
-            panel_w = sw - 2 * margin
-            panel_h = (sh - 2 * margin - clock_h - gap) // 2
-            draw_panel(canvas, fonts,
-                       (margin, margin, panel_w, panel_h),
-                       "Todo List", todo_items)
-            draw_panel(canvas, fonts,
-                       (margin, margin + panel_h + gap, panel_w, panel_h),
-                       "Shopping List", shopping_items)
-        else:
-            # Wide screen: side-by-side full-height columns.
-            panel_w = (sw - 2 * margin - gap) // 2
-            panel_h = sh - 2 * margin - clock_h
-            draw_panel(canvas, fonts,
-                       (margin, margin, panel_w, panel_h),
-                       "Todo List", todo_items)
-            draw_panel(canvas, fonts,
-                       (margin + panel_w + gap, margin, panel_w, panel_h),
-                       "Shopping List", shopping_items)
+        # Side-by-side full-height columns (works in both portrait and landscape):
+        # Todo on the left, Shopping on the right, each using the full height.
+        panel_w = (sw - 2 * margin - gap) // 2
+        panel_h = sh - 2 * margin - clock_h
+        draw_panel(canvas, fonts,
+                   (margin, margin, panel_w, panel_h),
+                   "Todo List", todo_items)
+        draw_panel(canvas, fonts,
+                   (margin + panel_w + gap, margin, panel_w, panel_h),
+                   "Shopping List", shopping_items)
 
         # Clock / date at the bottom
         stamp = time.strftime("%A, %B %d  \u2022  %I:%M %p")
