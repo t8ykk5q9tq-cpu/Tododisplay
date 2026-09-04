@@ -459,29 +459,26 @@ def main():
         canvas.blit(w_surf, (margin + (wbar.width - w_surf.get_width()) // 2,
                              margin + (weather_bar_h - w_surf.get_height()) // 2))
 
-        # Habit row, just under the weather bar (only if habits exist).
-        habits_h = 0
-        if habits_data:
-            habits_h = fonts["clock"].get_height() + 20
-            hy = margin + weather_bar_h + gap
-            draw_habits(canvas, fonts,
-                        (margin, hy, sw - 2 * margin, habits_h), habits_data)
+        # Everything below the weather bar starts here.
+        top = margin + weather_bar_h + gap
 
-        # Everything below the weather bar (+ habit row) starts here.
-        top = margin + weather_bar_h + gap + (habits_h + gap if habits_h else 0)
+        # Reserve heights for the bands that sit BELOW the lists:
+        #   habit row, then time-tracker band, then clock.
+        habits_h = (fonts["clock"].get_height() + 20) if habits_data else 0
 
-        # Reserve a band for the time tracker (only if it's set up). Its height
-        # scales with the screen and fits the header + recent check-ins.
-        # (~75% taller than the original so more check-ins are visible.)
         tracker_h = 0
         if tracker_data is not None:
+            # ~75% taller than the original so more check-ins are visible.
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
-        # height shrinks to leave room for the weather bar, tracker band + clock.
+        # height shrinks to leave room for the habit row, tracker band + clock.
+        below = clock_h
+        below += (habits_h + gap) if habits_h else 0
+        below += (tracker_h + gap) if tracker_h else 0
         panel_w = (sw - 2 * margin - gap) // 2
-        panel_h = sh - top - margin - clock_h - tracker_h - (gap if tracker_h else 0)
+        panel_h = sh - top - margin - below
         draw_panel(canvas, fonts,
                    (margin, top, panel_w, panel_h),
                    "Todo List", todo_items)
@@ -489,11 +486,15 @@ def main():
                    (margin + panel_w + gap, top, panel_w, panel_h),
                    "Shopping List", shopping_items)
 
-        # Time-tracker band, between the lists and the clock.
+        # Stack below the lists: habit row, then time-tracker band.
+        cursor_y = top + panel_h + gap
+        if habits_h:
+            draw_habits(canvas, fonts,
+                        (margin, cursor_y, sw - 2 * margin, habits_h), habits_data)
+            cursor_y += habits_h + gap
         if tracker_data is not None:
-            tracker_y = top + panel_h + gap
             draw_tracker(canvas, fonts,
-                         (margin, tracker_y, sw - 2 * margin, tracker_h),
+                         (margin, cursor_y, sw - 2 * margin, tracker_h),
                          tracker_data)
 
         # Clock / date at the bottom (centered)
