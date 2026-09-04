@@ -130,12 +130,17 @@ def _habit_streak(days_set):
     return streak
 
 
+HABIT_GRID_DAYS = 14  # how many days of history to show on the display grid
+
+
 def read_habits():
-    """Read habits from the DB with today's done-state and current streak.
-    Returns [] if the table isn't there yet."""
+    """Read habits from the DB with today's done-state, current streak, and a
+    short day-by-day history (for the on-screen grid). Returns [] if not ready."""
     if not os.path.exists(DB_PATH):
         return []
-    today = datetime.now().date().isoformat()
+    from datetime import timedelta
+    today_date = datetime.now().date()
+    today = today_date.isoformat()
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -148,10 +153,15 @@ def read_habits():
                 "SELECT day FROM habit_log WHERE habit_id = ?", (r["id"],)
             ).fetchall()
             days = {lr["day"] for lr in logs}
+            history = [
+                (today_date - timedelta(days=i)).isoformat() in days
+                for i in range(HABIT_GRID_DAYS - 1, -1, -1)  # oldest -> today
+            ]
             result.append({
                 "name": r["name"],
                 "done": today in days,
                 "streak": _habit_streak(days),
+                "history": history,
             })
         conn.close()
         return result
@@ -285,27 +295,38 @@ def draw_panel(screen, fonts, rect, title, items):
         screen.blit(empty_surf, (x + pad, line_y))
 
 
+GRID_EMPTY = (26, 42, 74)   # dark cell (missed / no data)
+
+
 def draw_habits(screen, fonts, rect, habits):
-    """Draw a horizontal habit row: each habit as a checkbox + name.
-    Done habits show a filled cyan box + strikethrough; not-done show an outline."""
+    """Draw habits as a vertical list. Each row: [box] Name  [streak]  [day grid].
+    The grid is a GitHub-style strip of the last HABIT_GRID_DAYS days."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=12)
     if not habits:
         return
     font = fonts["clock"]
     pad = 18
-    box = font.get_height() - 4
-    # Lay habits out evenly across the row.
     n = len(habits)
-    slot_w = (w - 2 * pad) // n
-    cy = y + (h - font.get_height()) // 2
+    row_h = (h - 2 * pad) // n
+    box = min(font.get_height() - 2, row_h - 8)
+
+    # Grid geometry: fixed cell size, right-aligned in the row.
+    ncells = len(habits[0].get("history", [])) or HABIT_GRID_DAYS
+    cell = max(8, min(row_h - 10, 18))
+    cell_gap = 3
+    grid_w = ncells * (cell + cell_gap)
+    grid_x = x + w - pad - grid_w
+
     for i, hb in enumerate(habits):
-        sx = x + pad + i * slot_w
+        ry = y + pad + i * row_h
+        cy = ry + (row_h - font.get_height()) // 2
         done = hb["done"]
-        box_rect = pygame.Rect(sx, cy + 2, box, box)
+
+        # Checkbox
+        box_rect = pygame.Rect(x + pad, cy + 2, box, box)
         if done:
             pygame.draw.rect(screen, HEADER_COLOR, box_rect, border_radius=4)
-            # checkmark tick
             pygame.draw.lines(screen, BG_COLOR, False, [
                 (box_rect.left + box * 0.22, box_rect.top + box * 0.52),
                 (box_rect.left + box * 0.42, box_rect.top + box * 0.72),
@@ -313,19 +334,26 @@ def draw_habits(screen, fonts, rect, habits):
             ], 3)
         else:
             pygame.draw.rect(screen, DONE_COLOR, box_rect, width=2, border_radius=4)
+
+        # Name
         name_color = DONE_COLOR if done else TEXT_COLOR
         name_surf = font.render(hb["name"], True, name_color)
-        name_x = sx + box + 10
+        name_x = x + pad + box + 10
         screen.blit(name_surf, (name_x, cy))
-        if done:
-            sy = cy + name_surf.get_height() // 2
-            pygame.draw.line(screen, DONE_COLOR, (name_x, sy),
-                             (name_x + name_surf.get_width(), sy), 2)
-        # Streak count next to the name (e.g. "5d") when there's an active streak.
+
+        # Streak
         streak = hb.get("streak", 0)
         if streak > 0:
             streak_surf = fonts["tiny"].render(f"{streak}d", True, HEADER_COLOR)
             screen.blit(streak_surf, (name_x + name_surf.get_width() + 8, cy + 3))
+
+        # Day grid (right-aligned), oldest -> today.
+        gy = ry + (row_h - cell) // 2
+        for j, on in enumerate(hb.get("history", [])):
+            cx = grid_x + j * (cell + cell_gap)
+            color = HEADER_COLOR if on else GRID_EMPTY
+            pygame.draw.rect(screen, color, pygame.Rect(cx, gy, cell, cell),
+                             border_radius=3)
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -493,8 +521,11 @@ def main():
         top = margin + weather_bar_h + gap
 
         # Reserve heights for the bands that sit BELOW the lists:
-        #   habit row, then time-tracker band, then clock.
-        habits_h = (fonts["clock"].get_height() + 20) if habits_data else 0
+        #   habit list (one row per habit + grid), tracker band, then clock.
+        habits_h = 0
+        if habits_data:
+            row = max(fonts["clock"].get_height() + 8, 26)
+            habits_h = row * len(habits_data) + 36
 
         tracker_h = 0
         if tracker_data is not None:
