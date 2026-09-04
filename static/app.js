@@ -5,7 +5,61 @@ let shoppingItems = [];
 // --- DOM References ---
 const todoList = document.getElementById("todo-list");
 const shoppingList = document.getElementById("shopping-list");
+const habitsRow = document.getElementById("habits-row");
 const clockEl = document.getElementById("clock");
+
+// --- Habits ---
+async function fetchHabits() {
+    const res = await fetch("/api/habits");
+    return res.json();
+}
+async function toggleHabit(id) {
+    await fetch(`/api/habits/${id}/toggle`, { method: "PATCH" });
+}
+async function addHabit(name) {
+    await fetch("/api/habits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+    });
+}
+async function deleteHabit(id) {
+    await fetch(`/api/habits/${id}`, { method: "DELETE" });
+}
+
+function renderHabits(habits) {
+    habitsRow.innerHTML = "";
+    habits.forEach((h) => {
+        const chip = document.createElement("div");
+        chip.className = "habit-chip" + (h.done ? " done" : "");
+
+        const box = document.createElement("span");
+        box.className = "habit-box";
+        box.textContent = h.done ? "\u2713" : "";
+
+        const name = document.createElement("span");
+        name.className = "habit-name";
+        name.textContent = h.name;
+
+        chip.addEventListener("click", async () => {
+            await toggleHabit(h.id);
+            await refreshAll();
+        });
+
+        // Long-press (or right-click) to delete a habit.
+        chip.addEventListener("contextmenu", async (e) => {
+            e.preventDefault();
+            if (confirm(`Delete habit "${h.name}"?`)) {
+                await deleteHabit(h.id);
+                await refreshAll();
+            }
+        });
+
+        chip.appendChild(box);
+        chip.appendChild(name);
+        habitsRow.appendChild(chip);
+    });
+}
 
 // --- API Helpers ---
 async function fetchItems(listType) {
@@ -70,7 +124,20 @@ async function refreshAll() {
     shoppingItems = await fetchItems("shopping");
     renderList(todoItems, todoList);
     renderList(shoppingItems, shoppingList);
+    const habits = await fetchHabits();
+    renderHabits(habits);
 }
+
+// --- Add Habit Form ---
+document.getElementById("add-habit-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = e.target.querySelector("input");
+    const name = input.value.trim();
+    if (!name) return;
+    await addHabit(name);
+    input.value = "";
+    await refreshAll();
+});
 
 // --- Form Handling ---
 document.querySelectorAll(".add-form").forEach((form) => {

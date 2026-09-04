@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import date
 from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__, static_folder="static")
@@ -32,6 +33,9 @@ def get_db():
     return conn
 
 
+DEFAULT_HABITS = ["Gym", "Water", "Read", "Meds"]
+
+
 def init_db():
     conn = get_db()
     conn.execute(
@@ -45,6 +49,25 @@ def init_db():
         )
         """
     )
+    # Habits: each has a name and the last date it was marked done (YYYY-MM-DD).
+    # A habit shows "done" only if last_done == today, so it auto-resets daily.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS habits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            last_done TEXT,
+            position INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    # Seed default habits only if the table is empty.
+    count = conn.execute("SELECT COUNT(*) FROM habits").fetchone()[0]
+    if count == 0:
+        for i, name in enumerate(DEFAULT_HABITS):
+            conn.execute(
+                "INSERT INTO habits (name, position) VALUES (?, ?)", (name, i)
+            )
     conn.commit()
     conn.close()
 
@@ -113,6 +136,67 @@ def clear_done(list_type):
         return jsonify({"error": "Invalid list type"}), 400
     conn = get_db()
     conn.execute("DELETE FROM items WHERE list_type = ? AND done = 1", (list_type,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# --- Habits ---
+
+
+@app.route("/api/habits", methods=["GET"])
+def get_habits():
+    today = date.today().isoformat()
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, name, last_done FROM habits ORDER BY position, id"
+    ).fetchall()
+    conn.close()
+    return jsonify([
+        {"id": r["id"], "name": r["name"], "done": (r["last_done"] == today)}
+        for r in rows
+    ])
+
+
+@app.route("/api/habits/<int:habit_id>/toggle", methods=["PATCH"])
+def toggle_habit(habit_id):
+    today = date.today().isoformat()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT last_done FROM habits WHERE id = ?", (habit_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return jsonify({"error": "Habit not found"}), 404
+    # If already done today, clear it; otherwise mark done today.
+    new_val = None if row["last_done"] == today else today
+    conn.execute("UPDATE habits SET last_done = ? WHERE id = ?", (new_val, habit_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"id": habit_id, "done": new_val is not None})
+
+
+@app.route("/api/habits", methods=["POST"])
+def add_habit():
+    data = request.get_json() or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    conn = get_db()
+    pos = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM habits").fetchone()[0]
+    cursor = conn.execute(
+        "INSERT INTO habits (name, position) VALUES (?, ?)", (name, pos)
+    )
+    conn.commit()
+    hid = cursor.lastrowid
+    conn.close()
+    return jsonify({"id": hid, "name": name, "done": False}), 201
+
+
+@app.route("/api/habits/<int:habit_id>", methods=["DELETE"])
+def delete_habit(habit_id):
+    conn = get_db()
+    conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})

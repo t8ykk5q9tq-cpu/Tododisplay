@@ -116,6 +116,24 @@ def read_items(list_type):
         return []
 
 
+def read_habits():
+    """Read habits from the DB. A habit is 'done' if last_done == today.
+    Returns [] if the table isn't there yet."""
+    if not os.path.exists(DB_PATH):
+        return []
+    today = datetime.now().date().isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT name, last_done FROM habits ORDER BY position, id"
+        ).fetchall()
+        conn.close()
+        return [{"name": r["name"], "done": (r["last_done"] == today)} for r in rows]
+    except sqlite3.Error:
+        return []
+
+
 def read_tracker():
     """Read the time-tracker log + state. Returns a dict with recent check-ins
     and seconds until the next check-in, or None if the tracker isn't set up."""
@@ -242,6 +260,44 @@ def draw_panel(screen, fonts, rect, title, items):
         screen.blit(empty_surf, (x + pad, line_y))
 
 
+def draw_habits(screen, fonts, rect, habits):
+    """Draw a horizontal habit row: each habit as a checkbox + name.
+    Done habits show a filled cyan box + strikethrough; not-done show an outline."""
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=12)
+    if not habits:
+        return
+    font = fonts["clock"]
+    pad = 18
+    box = font.get_height() - 4
+    # Lay habits out evenly across the row.
+    n = len(habits)
+    slot_w = (w - 2 * pad) // n
+    cy = y + (h - font.get_height()) // 2
+    for i, hb in enumerate(habits):
+        sx = x + pad + i * slot_w
+        done = hb["done"]
+        box_rect = pygame.Rect(sx, cy + 2, box, box)
+        if done:
+            pygame.draw.rect(screen, HEADER_COLOR, box_rect, border_radius=4)
+            # checkmark tick
+            pygame.draw.lines(screen, BG_COLOR, False, [
+                (box_rect.left + box * 0.22, box_rect.top + box * 0.52),
+                (box_rect.left + box * 0.42, box_rect.top + box * 0.72),
+                (box_rect.left + box * 0.78, box_rect.top + box * 0.28),
+            ], 3)
+        else:
+            pygame.draw.rect(screen, DONE_COLOR, box_rect, width=2, border_radius=4)
+        name_color = DONE_COLOR if done else TEXT_COLOR
+        name_surf = font.render(hb["name"], True, name_color)
+        name_x = sx + box + 10
+        screen.blit(name_surf, (name_x, cy))
+        if done:
+            sy = cy + name_surf.get_height() // 2
+            pygame.draw.line(screen, DONE_COLOR, (name_x, sy),
+                             (name_x + name_surf.get_width(), sy), 2)
+
+
 def draw_tracker(screen, fonts, rect, tracker):
     """Draw the time-tracker band: next check-in countdown + recent check-ins."""
     x, y, w, h = rect
@@ -353,6 +409,7 @@ def main():
     todo_items = []
     shopping_items = []
     tracker_data = None
+    habits_data = []
     update_str = last_update_str()
 
     running = True
@@ -371,6 +428,7 @@ def main():
             todo_items = read_items("todo")
             shopping_items = read_items("shopping")
             tracker_data = read_tracker()
+            habits_data = read_habits()
             update_str = last_update_str()
             last_tick = now
             last_refresh = now
@@ -401,8 +459,16 @@ def main():
         canvas.blit(w_surf, (margin + (wbar.width - w_surf.get_width()) // 2,
                              margin + (weather_bar_h - w_surf.get_height()) // 2))
 
-        # Everything below the weather bar starts here.
-        top = margin + weather_bar_h + gap
+        # Habit row, just under the weather bar (only if habits exist).
+        habits_h = 0
+        if habits_data:
+            habits_h = fonts["clock"].get_height() + 20
+            hy = margin + weather_bar_h + gap
+            draw_habits(canvas, fonts,
+                        (margin, hy, sw - 2 * margin, habits_h), habits_data)
+
+        # Everything below the weather bar (+ habit row) starts here.
+        top = margin + weather_bar_h + gap + (habits_h + gap if habits_h else 0)
 
         # Reserve a band for the time tracker (only if it's set up). Its height
         # scales with the screen and fits the header + recent check-ins.
