@@ -636,9 +636,10 @@ def main():
 
         gap = 24
         margin = 24
-        # Bottom area holds a rotating quote line above the clock/date.
-        quote_h = fonts["tiny"].get_height() + 8
-        clock_h = fonts["clock"].get_height() + 20 + quote_h
+        # Bottom area holds a rotating quote panel above the clock/date.
+        quote_h = fonts["clock"].get_height() + 20     # its own panel/box
+        clock_line_h = fonts["clock"].get_height() + 20
+        clock_h = clock_line_h + quote_h + gap
 
         # Weather bar across the top. Main line always shows; a sun line and
         # (when expected) a highlighted precip alert line appear below it.
@@ -724,22 +725,26 @@ def main():
                          (margin, cursor_y, sw - 2 * margin, tracker_h),
                          tracker_data)
 
-        # Rotating quote line (small, just above the clock).
-        quote_surf = fonts["tiny"].render(current_quote(), True, HEADER_COLOR)
-        quote_x = (sw - quote_surf.get_width()) // 2
-        canvas.blit(quote_surf, (quote_x, sh - clock_h + 4))
+        # Rotating quote in its own panel (above the clock).
+        quote_y = sh - clock_h + 4
+        qbar = pygame.Rect(margin, quote_y, sw - 2 * margin, quote_h)
+        pygame.draw.rect(canvas, PANEL_COLOR, qbar, border_radius=12)
+        quote_surf = fonts["clock"].render(current_quote(), True, HEADER_COLOR)
+        canvas.blit(quote_surf,
+                    (margin + (qbar.width - quote_surf.get_width()) // 2,
+                     quote_y + (quote_h - quote_surf.get_height()) // 2))
 
-        # Clock / date at the bottom (centered)
+        # Clock / date at the very bottom (centered)
+        clock_y = quote_y + quote_h + gap
         stamp = time.strftime("%A, %B %d   -   %I:%M %p")
         clock_surf = fonts["clock"].render(stamp, True, CLOCK_COLOR)
         clock_x = (sw - clock_surf.get_width()) // 2
-        canvas.blit(clock_surf, (clock_x, sh - clock_h + 4 + quote_h))
+        canvas.blit(clock_surf, (clock_x, clock_y + 2))
 
         # "Last updated" timestamp in the bottom-right corner (cached on refresh).
         if update_str:
             upd_surf = fonts["tiny"].render(update_str, True, DONE_COLOR)
-            canvas.blit(upd_surf, (sw - margin - upd_surf.get_width(),
-                                   sh - clock_h + 6 + quote_h))
+            canvas.blit(upd_surf, (sw - margin - upd_surf.get_width(), clock_y + 4))
 
         # Rotate the canvas onto the physical screen if needed.
         if canvas is not screen:
