@@ -312,6 +312,7 @@ body {
 .habit-top {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
     cursor: pointer;
     margin-bottom: 0.5rem;
@@ -331,7 +332,7 @@ body {
 }
 
 .habit-card.done .habit-box { background: #00d4ff; border-color: #00d4ff; }
-.habit-name { font-size: 1.05rem; color: #eaeaea; flex: 1; }
+.habit-name { font-size: 1.05rem; color: #eaeaea; }
 .habit-card.done .habit-name { text-decoration: line-through; color: #8a8a9a; }
 .habit-streak { font-size: 0.85rem; color: #ffb703; white-space: nowrap; }
 

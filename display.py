@@ -130,7 +130,7 @@ def _habit_streak(days_set):
     return streak
 
 
-HABIT_GRID_DAYS = 7  # days of history shown on the display grid (one clean row)
+HABIT_GRID_DAYS = 14  # days shown on the display grid (7 cols x 2 rows per card)
 
 
 def read_habits():
@@ -327,11 +327,13 @@ def draw_habits(screen, fonts, rect, habits):
     card_w = (w - 2 * pad - (cols - 1) * gap) // cols
     card_h = (h - 2 * pad - (rows - 1) * gap) // rows if rows else (h - 2 * pad)
 
-    # Grid geometry: one clean row of square cells, left-aligned in the card.
+    # Grid: 7 columns x 2 rows (14 days) filling the card width below the header.
+    gcols = 7
     ncells = len(habits[0].get("history", [])) if habits else HABIT_GRID_DAYS
-    cell_gap = 5
-    # Square cells sized to fit the card width; capped so they stay tidy squares.
-    cell = max(10, min(20, (card_w - 2 * cpad - (ncells - 1) * cell_gap) // ncells))
+    grows = (ncells + gcols - 1) // gcols
+    cell_gap = 4
+    # Cell size fills the card width across 7 columns.
+    cell = max(8, (card_w - 2 * cpad - (gcols - 1) * cell_gap) // gcols)
 
     for i, hb in enumerate(habits):
         r, c = divmod(i, cols)
@@ -341,10 +343,22 @@ def draw_habits(screen, fonts, rect, habits):
                          pygame.Rect(cx, cy, card_w, card_h), border_radius=10)
 
         done = hb["done"]
-        # --- Header: checkbox + name + streak ---
-        box = font.get_height() - 4
-        bx, by = cx + cpad, cy + cpad
-        box_rect = pygame.Rect(bx, by, box, box)
+
+        # --- Centered header on top: checkbox + name (+ streak) ---
+        box = font.get_height() - 6
+        name_color = DONE_COLOR if done else TEXT_COLOR
+        name_surf = font.render(hb["name"], True, name_color)
+        streak = hb.get("streak", 0)
+        streak_surf = small.render(f"{streak}d", True, STREAK_COLOR) if streak > 0 else None
+
+        # Compute total header width to center it.
+        hdr_w = box + 8 + name_surf.get_width()
+        if streak_surf:
+            hdr_w += 8 + streak_surf.get_width()
+        hx = cx + (card_w - hdr_w) // 2
+        hy = cy + cpad
+
+        box_rect = pygame.Rect(hx, hy, box, box)
         if done:
             pygame.draw.rect(screen, HEADER_COLOR, box_rect, border_radius=4)
             pygame.draw.lines(screen, BG_COLOR, False, [
@@ -354,34 +368,28 @@ def draw_habits(screen, fonts, rect, habits):
             ], 3)
         else:
             pygame.draw.rect(screen, DONE_COLOR, box_rect, width=2, border_radius=4)
-
-        name_color = DONE_COLOR if done else TEXT_COLOR
-        name_surf = font.render(hb["name"], True, name_color)
-        screen.blit(name_surf, (bx + box + 8, by))
-
-        streak = hb.get("streak", 0)
-        if streak > 0:
-            streak_surf = small.render(f"{streak}d", True, STREAK_COLOR)
+        screen.blit(name_surf, (hx + box + 8, hy + (box - name_surf.get_height()) // 2))
+        if streak_surf:
             screen.blit(streak_surf,
-                        (cx + card_w - cpad - streak_surf.get_width(), by + 2))
+                        (hx + box + 8 + name_surf.get_width() + 8, hy + 2))
 
-        # --- Day grid below the header (single row, oldest -> today) ---
-        # GitHub heatmap style: gray for missed, greens for done. Intensity
-        # grows with the current run of consecutive done-days (brighter = hotter).
-        gx = cx + cpad
-        gy = by + box + 10
+        # --- Grid below the header: 7 cols x 2 rows, centered, filling width ---
+        grid_w = gcols * cell + (gcols - 1) * cell_gap
+        gx = cx + (card_w - grid_w) // 2
+        gy = hy + box + 10
         history = hb.get("history", [])
         run = 0
         for j, on in enumerate(history):
-            px = gx + j * (cell + cell_gap)
+            gr, gc = divmod(j, gcols)
+            px = gx + gc * (cell + cell_gap)
+            py = gy + gr * (cell + cell_gap)
             if on:
                 run += 1
-                shade = GH_GREENS[min(run - 1, len(GH_GREENS) - 1)]
-                color = shade
+                color = GH_GREENS[min(run - 1, len(GH_GREENS) - 1)]
             else:
                 run = 0
                 color = GH_EMPTY
-            pygame.draw.rect(screen, color, pygame.Rect(px, gy, cell, cell),
+            pygame.draw.rect(screen, color, pygame.Rect(px, py, cell, cell),
                              border_radius=3)
 
 
@@ -555,9 +563,14 @@ def main():
         if habits_data:
             hcols = 3
             hrows = (len(habits_data) + hcols - 1) // hcols
-            hdr = fonts["clock"].get_height() + 6      # header row height
-            cell_est = 18                              # single grid row
-            card_h = hdr + 8 + cell_est + 20
+            # Estimate the grid cell size from the expected card width so the
+            # reserved height matches the 7x2 grid drawn inside each card.
+            band_w = sw - 2 * 24
+            est_card_w = (band_w - 2 * 16 - (hcols - 1) * 12) // hcols
+            est_cell = max(8, (est_card_w - 2 * 10 - 6 * 4) // 7)
+            hdr = fonts["clock"].get_height() + 6
+            grid_block = 2 * est_cell + 4              # 2 grid rows + gap
+            card_h = hdr + 10 + grid_block + 18
             habits_h = hrows * card_h + (hrows - 1) * 12 + 2 * 16
 
         tracker_h = 0
