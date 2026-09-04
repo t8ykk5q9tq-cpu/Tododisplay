@@ -31,15 +31,16 @@ fi
 
 # --- Stop any existing instance ---
 pkill -f "app.py" 2>/dev/null || true
+pkill -f "tracker.py" 2>/dev/null || true
 pkill -f "display.py" 2>/dev/null || true
 sleep 1
 
-# --- Start the Flask server in the background ---
-echo "Starting server..."
+# --- Start the Flask list server in the background ---
+echo "Starting list server..."
 $PYTHON app.py &
 SERVER_PID=$!
 
-# Wait for the server to be ready
+# Wait for the list server to be ready
 echo "Waiting for server..."
 for i in $(seq 1 20); do
     if curl -s http://localhost:5000 > /dev/null 2>&1; then
@@ -47,6 +48,12 @@ for i in $(seq 1 20); do
     fi
     sleep 0.5
 done
+
+# --- Start the time-tracker service (port 5050) in the background ---
+# It runs even without tracker_config.py (notifications just stay disabled).
+echo "Starting time tracker..."
+$PYTHON tracker.py &
+TRACKER_PID=$!
 
 # --- Start the fullscreen display ---
 # If a desktop (X) is running, use it. Otherwise pygame draws to the framebuffer.
@@ -59,8 +66,10 @@ else
 fi
 DISPLAY_PID=$!
 
-echo "Running. Server PID: $SERVER_PID, Display PID: $DISPLAY_PID"
-echo "Add items from any device at: http://$(hostname -I | awk '{print $1}'):5000"
+PI_IP=$(hostname -I | awk '{print $1}')
+echo "Running. Server PID: $SERVER_PID, Tracker PID: $TRACKER_PID, Display PID: $DISPLAY_PID"
+echo "Lists:        http://$PI_IP:5000"
+echo "Time tracker: http://$PI_IP:5050"
 echo "To stop: ./stop.sh  (or press Esc/Q on the Pi)"
 
 # --- Auto-update loop (Option 1: self-contained, no cron) ---
@@ -97,7 +106,7 @@ update_loop() {
             DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" \
                 nohup bash "$SCRIPT_DIR/start-lite.sh" >> "$LOG" 2>&1 &
             # Stop this (old) instance; the new one takes over.
-            kill "$SERVER_PID" "$DISPLAY_PID" 2>/dev/null
+            kill "$SERVER_PID" "$TRACKER_PID" "$DISPLAY_PID" 2>/dev/null
             exit 0
         else
             echo "No changes." >> "$LOG"
@@ -114,7 +123,7 @@ fi
 # Clean up all child processes when this script is stopped.
 cleanup() {
     kill "$UPDATE_PID" 2>/dev/null
-    kill "$SERVER_PID" "$DISPLAY_PID" 2>/dev/null
+    kill "$SERVER_PID" "$TRACKER_PID" "$DISPLAY_PID" 2>/dev/null
 }
 trap cleanup EXIT INT TERM
 

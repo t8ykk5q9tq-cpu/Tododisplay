@@ -7,5 +7,6 @@ pkill -f "start-lite.sh" 2>/dev/null || true
 pkill -f "chromium.*localhost:5000" 2>/dev/null || true
 pkill -f "chromium-browser.*localhost:5000" 2>/dev/null || true
 pkill -f "display.py" 2>/dev/null || true
+pkill -f "tracker.py" 2>/dev/null || true
 pkill -f "app.py" 2>/dev/null || true
 echo "Stopped."

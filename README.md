@@ -132,3 +132,61 @@ Tododisplay/
   ```
   display_rotate=1
   ```
+
+## Time Tracker (optional add-on)
+
+A built-in time tracker runs alongside the lists. Every 30 minutes it can ping
+your phone (via Pushover) asking what you've been up to. You log check-ins from
+your phone, and the Pi's display shows a **Time Tracker** band under the lists
+with the next check-in countdown and your most recent check-ins.
+
+It runs as a **separate Flask service on port 5050**, started automatically by
+`start-lite.sh`. It works even without any configuration — notifications just
+stay off until you set them up.
+
+### Setup
+
+1. Copy the example config and fill in your details:
+   ```bash
+   cp tracker_config.example.py tracker_config.py
+   nano tracker_config.py
+   ```
+   - `PUSHOVER_USER` / `PUSHOVER_TOKEN` — for phone push reminders (leave blank to disable)
+   - `GMAIL_FROM` / `GMAIL_PASS` / `RECIPIENT` — for the optional daily email summary (use a Gmail App Password)
+   - `CHECKIN_INTERVAL_MIN` — minutes between reminders (default 30)
+
+   **`tracker_config.py` is gitignored** so your secrets never get committed
+   (this repo is public). Do not put keys anywhere else in the project.
+
+2. That's it — `start-lite.sh` launches the tracker automatically. Restart:
+   ```bash
+   bash stop.sh
+   ROTATE=90 bash start-lite.sh
+   ```
+
+### Using it from your phone
+
+Over Tailscale, open:
+```
+http://100.67.122.101:5050
+```
+(or `http://<pi>:5050` on home Wi-Fi). You can log a check-in, see recent ones,
+and toggle Sleep/Wake to pause reminders overnight. Add it to your home screen
+for one-tap access, just like the lists page.
+
+### What shows on the Pi display
+
+Under the todo and shopping lists, a band shows:
+- **Time Tracker** header with a live `next: MM:SS` countdown (or "Sleeping")
+- Your last few check-ins, newest first, with timestamps
+
+The display reads the tracker's data files directly, so it stays in sync without
+any extra network calls. The band only appears once the tracker has run at least
+once (it creates `tracker_log.json` / `tracker_state.json`, both gitignored).
+
+### Ports summary
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Lists   | 5000 | Todo + shopping web interface |
+| Tracker | 5050 | Time-tracker check-in interface |

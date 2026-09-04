@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eaeaea;
+            min-height: 100vh;
+            padding: 1.25rem;
+        }
+        h1 { font-size: 1.5rem; color: #00d4ff; text-align: center; margin-bottom: 1rem; }
+        .card {
+            background: #16213e;
+            border-radius: 1rem;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+        }
+        .countdown { text-align: center; }
+        .countdown .time { font-size: 2.5rem; font-weight: 700; color: #eaeaea; }
+        .countdown .label { color: #8a8a9a; font-size: 0.9rem; }
+        .countdown.pending .time { color: #e94560; }
+        .add-form { display: flex; gap: 0.5rem; }
+        .add-form input {
+            flex: 1; padding: 0.9rem 1rem; border: 2px solid #0f3460;
+            border-radius: 0.5rem; background: #0f3460; color: #eaeaea;
+            font-size: 16px; outline: none;
+        }
+        .add-form input:focus { border-color: #00d4ff; }
+        .add-form button {
+            padding: 0.9rem 1.25rem; border: none; border-radius: 0.5rem;
+            background: #00d4ff; color: #1a1a2e; font-size: 1.1rem;
+            font-weight: bold; cursor: pointer;
+        }
+        .recent-title { font-size: 0.85rem; color: #8a8a9a; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .recent-item { padding: 0.6rem 0; border-bottom: 1px solid #0f3460; }
+        .recent-item:last-child { border-bottom: none; }
+        .recent-item .t { color: #00d4ff; font-size: 0.8rem; }
+        .recent-item .x { color: #eaeaea; }
+        .btn-row { display: flex; gap: 0.5rem; }
+        .btn-row button {
+            flex: 1; padding: 0.8rem; border: 1px solid #0f3460;
+            border-radius: 0.5rem; background: transparent; color: #8a8a9a;
+            font-size: 0.95rem; cursor: pointer;
+        }
+        .btn-row button:hover { color: #00d4ff; border-color: #00d4ff; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .awake { background: #4caf50; }
+        .asleep { background: #8a8a9a; }
+    </style>
+</head>
+<body>
+    <h1>Time Tracker</h1>
+
+    <div class="card countdown" id="countdown">
+        <div class="time" id="cd-time">--:--</div>
+        <div class="label" id="cd-label">until next check-in</div>
+    </div>
+
+    <div class="card">
+        <form class="add-form" id="add-form">
+            <input type="text" id="entry" placeholder="What have you been up to?" autocomplete="off">
+            <button type="submit">Log</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="recent-title">Recent check-ins</div>
+        <div id="recent"></div>
+    </div>
+
+    <div class="card btn-row">
+        <button id="wake-btn"><span class="status-dot awake"></span>Awake</button>
+        <button id="sleep-btn"><span class="status-dot asleep"></span>Sleep</button>
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            try {
+                const res = await fetch("/status", { cache: "no-store" });
+                return await res.json();
+            } catch (e) { return null; }
+        }
+
+        function fmt(secs) {
+            const m = Math.floor(secs / 60);
+            const s = secs % 60;
+            return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+        }
+
+        function renderRecent(recent) {
+            const el = document.getElementById("recent");
+            if (!recent || recent.length === 0) {
+                el.innerHTML = '<div class="recent-item"><span class="x">No check-ins yet</span></div>';
+                return;
+            }
+            el.innerHTML = recent.slice().reverse().map(e => {
+                const d = new Date(e.timestamp);
+                const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                return `<div class="recent-item"><span class="t">${t}</span><br><span class="x">${e.text}</span></div>`;
+            }).join("");
+        }
+
+        let remaining = 0;
+        let pending = false;
+
+        async function refresh() {
+            const s = await fetchStatus();
+            if (!s) return;
+            remaining = s.next_checkin_in;
+            pending = s.notification_pending;
+            renderRecent(s.recent);
+            updateCountdown();
+        }
+
+        function updateCountdown() {
+            const cd = document.getElementById("countdown");
+            const timeEl = document.getElementById("cd-time");
+            const labelEl = document.getElementById("cd-label");
+            if (pending) {
+                cd.classList.add("pending");
+                timeEl.textContent = "Check in!";
+                labelEl.textContent = "tap the box above";
+            } else {
+                cd.classList.remove("pending");
+                timeEl.textContent = fmt(Math.max(0, remaining));
+                labelEl.textContent = "until next check-in";
+            }
+        }
+
+        // Local countdown tick between server refreshes
+        setInterval(() => { if (remaining > 0 && !pending) { remaining--; updateCountdown(); } }, 1000);
+        setInterval(refresh, 15000);
+
+        document.getElementById("add-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const input = document.getElementById("entry");
+            const text = input.value.trim();
+            if (!text) return;
+            await fetch("/log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text })
+            });
+            input.value = "";
+            pending = false;
+            refresh();
+        });
+
+        document.getElementById("wake-btn").addEventListener("click", async () => {
+            await fetch("/wake", { method: "POST" });
+            refresh();
+        });
+        document.getElementById("sleep-btn").addEventListener("click", async () => {
+            await fetch("/sleep", { method: "POST" });
+            refresh();
+        });
+
+        refresh();
+    </script>
+</body>
+</html>

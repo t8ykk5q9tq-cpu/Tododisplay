@@ -12,3 +12,9 @@ lists.db
 
 # Runtime log from update.sh
 update.log
+
+# Time tracker: secrets and runtime data (never commit — repo is public)
+tracker_config.py
+tracker_log.json
+tracker_state.json
+tracker.log

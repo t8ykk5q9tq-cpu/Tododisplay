@@ -7,15 +7,19 @@ pygame, reading from the same SQLite database the Flask web app uses.
 No browser or desktop environment required. Add/remove items from any device via
 the Flask web interface at http://<pi-ip>:5000 -- changes appear here automatically.
 """
+import json
 import os
 import sqlite3
 import sys
 import time
+from datetime import datetime
 
 import pygame
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lists.db")
+TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
+TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 
 # --- Appearance ---
 BG_COLOR = (26, 26, 46)        # dark navy
@@ -53,6 +57,34 @@ def read_items(list_type):
         return [dict(r) for r in rows]
     except sqlite3.Error:
         return []
+
+
+def read_tracker():
+    """Read the time-tracker log + state. Returns a dict with recent check-ins
+    and seconds until the next check-in, or None if the tracker isn't set up."""
+    if not os.path.exists(TRACKER_LOG) and not os.path.exists(TRACKER_STATE):
+        return None
+    recent = []
+    try:
+        with open(TRACKER_LOG) as f:
+            entries = json.load(f)
+        recent = entries[-4:]
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    next_in = None
+    is_awake = True
+    try:
+        with open(TRACKER_STATE) as f:
+            state = json.load(f)
+        is_awake = state.get("is_awake", True)
+        nct = state.get("next_checkin_time")
+        if nct is not None:
+            next_in = max(0, int(nct - time.time()))
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return {"recent": recent, "next_in": next_in, "is_awake": is_awake}
 
 
 def draw_panel(screen, fonts, rect, title, items):
@@ -130,6 +162,67 @@ def draw_panel(screen, fonts, rect, title, items):
         screen.blit(empty_surf, (x + pad, line_y))
 
 
+def draw_tracker(screen, fonts, rect, tracker):
+    """Draw the time-tracker band: next check-in countdown + recent check-ins."""
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
+    pad = 20
+    item_font = fonts["item"]
+    small_font = fonts["clock"]
+
+    # Header row: "Time Tracker" + countdown on the right.
+    title_surf = fonts["clock"].render("Time Tracker", True, HEADER_COLOR)
+    screen.blit(title_surf, (x + pad, y + pad))
+
+    next_in = tracker.get("next_in")
+    awake = tracker.get("is_awake", True)
+    if not awake:
+        cd_text = "Sleeping"
+        cd_color = DONE_COLOR
+    elif next_in is None:
+        cd_text = ""
+        cd_color = TEXT_COLOR
+    else:
+        m, s = divmod(int(next_in), 60)
+        cd_text = f"next: {m:02d}:{s:02d}"
+        cd_color = TEXT_COLOR
+    if cd_text:
+        cd_surf = fonts["clock"].render(cd_text, True, cd_color)
+        screen.blit(cd_surf, (x + w - pad - cd_surf.get_width(), y + pad))
+
+    # Recent check-ins below the header.
+    line_y = y + pad + title_surf.get_height() + 12
+    line_h = item_font.get_height() + 8
+    bottom = y + h - pad
+    recent = tracker.get("recent") or []
+    if not recent:
+        empty = small_font.render("No check-ins yet", True, DONE_COLOR)
+        screen.blit(empty, (x + pad, line_y))
+        return
+
+    for e in reversed(recent):  # newest first
+        if line_y + line_h > bottom:
+            break
+        try:
+            t = datetime.fromisoformat(e["timestamp"]).strftime("%I:%M %p")
+        except (ValueError, KeyError):
+            t = ""
+        time_surf = small_font.render(t, True, HEADER_COLOR)
+        screen.blit(time_surf, (x + pad, line_y + 2))
+        time_w = time_surf.get_width() + 12
+
+        text = e.get("text", "")
+        # Truncate to fit on one line.
+        max_w = w - 2 * pad - time_w
+        rendered = item_font.render(text, True, TEXT_COLOR)
+        if rendered.get_width() > max_w:
+            while rendered.get_width() > max_w and len(text) > 3:
+                text = text[:-2]
+                rendered = item_font.render(text + "\u2026", True, TEXT_COLOR)
+        screen.blit(rendered, (x + pad + time_w, line_y))
+        line_y += line_h
+
+
 def main():
     pygame.init()
     pygame.mouse.set_visible(False)
@@ -172,8 +265,10 @@ def main():
 
     clock = pygame.time.Clock()
     last_refresh = 0.0
+    last_tick = time.time()
     todo_items = []
     shopping_items = []
+    tracker_data = None
 
     running = True
     while running:
@@ -190,7 +285,17 @@ def main():
         if now - last_refresh >= REFRESH_SECONDS:
             todo_items = read_items("todo")
             shopping_items = read_items("shopping")
+            tracker_data = read_tracker()
+            last_tick = now
             last_refresh = now
+
+        # Tick the countdown down smoothly between data refreshes.
+        if tracker_data is not None and tracker_data.get("next_in") is not None \
+                and tracker_data.get("is_awake", True):
+            elapsed = now - last_tick
+            if elapsed >= 1:
+                tracker_data["next_in"] = max(0, tracker_data["next_in"] - int(elapsed))
+                last_tick = now
 
         # --- Draw (onto canvas) ---
         canvas.fill(BG_COLOR)
@@ -198,16 +303,31 @@ def main():
         gap = 24
         margin = 24
         clock_h = fonts["clock"].get_height() + 20
-        # Side-by-side full-height columns (works in both portrait and landscape):
-        # Todo on the left, Shopping on the right, each using the full height.
+
+        # Reserve a band for the time tracker (only if it's set up). Its height
+        # scales with the screen and fits the header + up to ~4 recent check-ins.
+        tracker_h = 0
+        if tracker_data is not None:
+            tracker_h = int((fonts["item"].get_height() + 8) * 4
+                            + fonts["clock"].get_height() + 44)
+
+        # Side-by-side full-height columns: Todo left, Shopping right. Their
+        # height shrinks to leave room for the tracker band + clock below.
         panel_w = (sw - 2 * margin - gap) // 2
-        panel_h = sh - 2 * margin - clock_h
+        panel_h = sh - 2 * margin - clock_h - tracker_h - (gap if tracker_h else 0)
         draw_panel(canvas, fonts,
                    (margin, margin, panel_w, panel_h),
                    "Todo List", todo_items)
         draw_panel(canvas, fonts,
                    (margin + panel_w + gap, margin, panel_w, panel_h),
                    "Shopping List", shopping_items)
+
+        # Time-tracker band, between the lists and the clock.
+        if tracker_data is not None:
+            tracker_y = margin + panel_h + gap
+            draw_tracker(canvas, fonts,
+                         (margin, tracker_y, sw - 2 * margin, tracker_h),
+                         tracker_data)
 
         # Clock / date at the bottom
         stamp = time.strftime("%A, %B %d   -   %I:%M %p")
