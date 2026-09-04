@@ -145,20 +145,26 @@ def read_tracker():
 
 
 def last_update_str():
-    """Return a short 'updated' timestamp based on when git last fetched/pulled.
-    Uses .git/FETCH_HEAD mtime (touched on every fetch/pull); falls back to the
-    HEAD commit file mtime. Returns '' if unavailable."""
-    candidates = [
-        os.path.join(BASE_DIR, ".git", "FETCH_HEAD"),
-        os.path.join(BASE_DIR, ".git", "HEAD"),
-    ]
-    for path in candidates:
-        try:
-            mtime = os.path.getmtime(path)
-            return "updated " + datetime.fromtimestamp(mtime).strftime("%b %d %I:%M %p")
-        except OSError:
-            continue
-    return ""
+    """Return a short 'updated' timestamp for when the code genuinely last
+    changed -- the date of the current HEAD commit. This reflects real code
+    changes, not just when git last checked/fetched. Returns '' if unavailable."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "-C", BASE_DIR, "log", "-1", "--format=%cd", "--date=format:%b %d %I:%M %p"],
+            capture_output=True, text=True, timeout=5,
+        )
+        stamp = out.stdout.strip()
+        if stamp:
+            return "updated " + stamp
+    except Exception:
+        pass
+    # Fallback: mtime of the commit pointer file.
+    try:
+        mtime = os.path.getmtime(os.path.join(BASE_DIR, ".git", "HEAD"))
+        return "updated " + datetime.fromtimestamp(mtime).strftime("%b %d %I:%M %p")
+    except OSError:
+        return ""
 
 
 def draw_panel(screen, fonts, rect, title, items):
