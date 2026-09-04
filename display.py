@@ -87,6 +87,23 @@ def read_tracker():
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake}
 
 
+def last_update_str():
+    """Return a short 'updated' timestamp based on when git last fetched/pulled.
+    Uses .git/FETCH_HEAD mtime (touched on every fetch/pull); falls back to the
+    HEAD commit file mtime. Returns '' if unavailable."""
+    candidates = [
+        os.path.join(BASE_DIR, ".git", "FETCH_HEAD"),
+        os.path.join(BASE_DIR, ".git", "HEAD"),
+    ]
+    for path in candidates:
+        try:
+            mtime = os.path.getmtime(path)
+            return "updated " + datetime.fromtimestamp(mtime).strftime("%b %d %I:%M %p")
+        except OSError:
+            continue
+    return ""
+
+
 def draw_panel(screen, fonts, rect, title, items):
     """Draw one list panel (title + items) inside the given rect."""
     x, y, w, h = rect
@@ -261,6 +278,7 @@ def main():
         "title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12))), bold=True),
         "item": make_font(int(os.environ.get("ITEM_PT", max(18, min(sw, sh) // 19)))),
         "clock": make_font(int(os.environ.get("CLOCK_PT", max(14, min(sw, sh) // 27)))),
+        "tiny": make_font(max(12, min(sw, sh) // 40)),
     }
 
     clock = pygame.time.Clock()
@@ -269,6 +287,7 @@ def main():
     todo_items = []
     shopping_items = []
     tracker_data = None
+    update_str = last_update_str()
 
     running = True
     while running:
@@ -286,6 +305,7 @@ def main():
             todo_items = read_items("todo")
             shopping_items = read_items("shopping")
             tracker_data = read_tracker()
+            update_str = last_update_str()
             last_tick = now
             last_refresh = now
 
@@ -329,11 +349,17 @@ def main():
                          (margin, tracker_y, sw - 2 * margin, tracker_h),
                          tracker_data)
 
-        # Clock / date at the bottom
+        # Clock / date at the bottom (centered)
         stamp = time.strftime("%A, %B %d   -   %I:%M %p")
         clock_surf = fonts["clock"].render(stamp, True, CLOCK_COLOR)
         clock_x = (sw - clock_surf.get_width()) // 2
         canvas.blit(clock_surf, (clock_x, sh - clock_h + 4))
+
+        # "Last updated" timestamp in the bottom-right corner (cached on refresh).
+        if update_str:
+            upd_surf = fonts["tiny"].render(update_str, True, DONE_COLOR)
+            canvas.blit(upd_surf, (sw - margin - upd_surf.get_width(),
+                                   sh - clock_h + 6))
 
         # Rotate the canvas onto the physical screen if needed.
         if canvas is not screen:
