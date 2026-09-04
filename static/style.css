@@ -301,21 +301,25 @@ body {
     gap: 0.75rem;
 }
 
-.habit-chip {
+.habit-card {
+    background: #0f3460;
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    user-select: none;
+    min-width: 8.5rem;
+}
+
+.habit-top {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.6rem 1rem;
-    background: #0f3460;
-    border-radius: 0.6rem;
     cursor: pointer;
-    user-select: none;
-    transition: opacity 0.2s;
+    margin-bottom: 0.5rem;
 }
 
-.habit-chip .habit-box {
-    width: 1.4rem;
-    height: 1.4rem;
+.habit-box {
+    width: 1.3rem;
+    height: 1.3rem;
     border: 2px solid #6a7290;
     border-radius: 0.35rem;
     display: flex;
@@ -323,23 +327,35 @@ body {
     justify-content: center;
     color: #1a1a2e;
     font-weight: bold;
+    flex-shrink: 0;
 }
 
-.habit-chip.done .habit-box {
-    background: #00d4ff;
-    border-color: #00d4ff;
+.habit-card.done .habit-box { background: #00d4ff; border-color: #00d4ff; }
+.habit-name { font-size: 1.05rem; color: #eaeaea; flex: 1; }
+.habit-card.done .habit-name { text-decoration: line-through; color: #8a8a9a; }
+.habit-streak { font-size: 0.85rem; color: #ffb703; white-space: nowrap; }
+
+/* GitHub-style contribution grid */
+.habit-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
 }
 
-.habit-chip .habit-name { font-size: 1.05rem; color: #eaeaea; }
+.grid-cell {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    background: #1a2a4a;   /* empty day */
+}
 
-.habit-chip.done { opacity: 0.55; }
-.habit-chip.done .habit-name { text-decoration: line-through; }
+.grid-cell.on { background: #00d4ff; }  /* completed day */
 
 @media (max-width: 640px) {
     .habits-panel { margin: 1rem 1rem 0 1rem; padding: 0.9rem 1rem; }
     .habits-header { flex-direction: column; align-items: stretch; }
     .habits-header h1 { font-size: 1.25rem; }
     .add-habit-form input { flex: 1; width: auto; }
-    .habit-chip { padding: 0.7rem 1rem; }
-    .habit-chip .habit-name { font-size: 1.1rem; }
+    .habit-card { flex: 1; min-width: 45%; }
+    .grid-cell { width: 12px; height: 12px; }
 }

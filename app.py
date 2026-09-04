@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__, static_folder="static")
@@ -61,6 +61,17 @@ def init_db():
             name TEXT NOT NULL,
             last_done TEXT,
             position INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    # History: one row per (habit, day-completed). Powers the GitHub-style
+    # grid and streak calculations.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS habit_log (
+            habit_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            PRIMARY KEY (habit_id, day)
         )
         """
     )
@@ -150,37 +161,87 @@ def clear_done(list_type):
 
 # --- Habits ---
 
+HISTORY_DAYS = 14  # how many days the grid shows
+
+
+def _completed_days(conn, habit_id):
+    """Set of ISO date strings this habit was completed."""
+    rows = conn.execute(
+        "SELECT day FROM habit_log WHERE habit_id = ?", (habit_id,)
+    ).fetchall()
+    return {r["day"] for r in rows}
+
+
+def _streak(days_set):
+    """Current consecutive-day streak ending today (or yesterday if not yet
+    done today). Counts backward from today while each day is present."""
+    if not days_set:
+        return 0
+    today = date.today()
+    # Allow the streak to be "alive" if today isn't done yet but yesterday was.
+    start = today if today.isoformat() in days_set else today - timedelta(days=1)
+    streak = 0
+    d = start
+    while d.isoformat() in days_set:
+        streak += 1
+        d -= timedelta(days=1)
+    return streak
+
+
+def _history(days_set, n=HISTORY_DAYS):
+    """List of {day, done} for the last n days, oldest first (for the grid)."""
+    today = date.today()
+    out = []
+    for i in range(n - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        out.append({"day": d, "done": d in days_set})
+    return out
+
 
 @app.route("/api/habits", methods=["GET"])
 def get_habits():
     today = date.today().isoformat()
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, name, last_done FROM habits ORDER BY position, id"
+        "SELECT id, name FROM habits ORDER BY position, id"
     ).fetchall()
+    result = []
+    for r in rows:
+        days = _completed_days(conn, r["id"])
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "done": today in days,
+            "streak": _streak(days),
+            "history": _history(days),
+        })
     conn.close()
-    return jsonify([
-        {"id": r["id"], "name": r["name"], "done": (r["last_done"] == today)}
-        for r in rows
-    ])
+    return jsonify(result)
 
 
 @app.route("/api/habits/<int:habit_id>/toggle", methods=["PATCH"])
 def toggle_habit(habit_id):
     today = date.today().isoformat()
     conn = get_db()
-    row = conn.execute(
-        "SELECT last_done FROM habits WHERE id = ?", (habit_id,)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM habits WHERE id = ?", (habit_id,)).fetchone()
     if row is None:
         conn.close()
         return jsonify({"error": "Habit not found"}), 404
-    # If already done today, clear it; otherwise mark done today.
-    new_val = None if row["last_done"] == today else today
-    conn.execute("UPDATE habits SET last_done = ? WHERE id = ?", (new_val, habit_id))
+    done_today = conn.execute(
+        "SELECT 1 FROM habit_log WHERE habit_id = ? AND day = ?", (habit_id, today)
+    ).fetchone() is not None
+    if done_today:
+        conn.execute("DELETE FROM habit_log WHERE habit_id = ? AND day = ?",
+                     (habit_id, today))
+        conn.execute("UPDATE habits SET last_done = NULL WHERE id = ?", (habit_id,))
+    else:
+        conn.execute("INSERT OR IGNORE INTO habit_log (habit_id, day) VALUES (?, ?)",
+                     (habit_id, today))
+        conn.execute("UPDATE habits SET last_done = ? WHERE id = ?", (today, habit_id))
+    days = _completed_days(conn, habit_id)
     conn.commit()
     conn.close()
-    return jsonify({"id": habit_id, "done": new_val is not None})
+    return jsonify({"id": habit_id, "done": not done_today, "streak": _streak(days)})
 
 
 @app.route("/api/habits", methods=["POST"])
@@ -204,6 +265,7 @@ def add_habit():
 def delete_habit(habit_id):
     conn = get_db()
     conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
+    conn.execute("DELETE FROM habit_log WHERE habit_id = ?", (habit_id,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})

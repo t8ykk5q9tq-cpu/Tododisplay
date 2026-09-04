@@ -30,8 +30,12 @@ async function deleteHabit(id) {
 function renderHabits(habits) {
     habitsRow.innerHTML = "";
     habits.forEach((h) => {
-        const chip = document.createElement("div");
-        chip.className = "habit-chip" + (h.done ? " done" : "");
+        const card = document.createElement("div");
+        card.className = "habit-card" + (h.done ? " done" : "");
+
+        // --- Top row: checkbox + name + streak ---
+        const top = document.createElement("div");
+        top.className = "habit-top";
 
         const box = document.createElement("span");
         box.className = "habit-box";
@@ -41,13 +45,20 @@ function renderHabits(habits) {
         name.className = "habit-name";
         name.textContent = h.name;
 
-        chip.addEventListener("click", async () => {
+        const streak = document.createElement("span");
+        streak.className = "habit-streak";
+        streak.textContent = h.streak > 0 ? `\uD83D\uDD25 ${h.streak}` : "";
+
+        top.appendChild(box);
+        top.appendChild(name);
+        top.appendChild(streak);
+
+        // Tapping the top row toggles today's completion.
+        top.addEventListener("click", async () => {
             await toggleHabit(h.id);
             await refreshAll();
         });
-
-        // Long-press (or right-click) to delete a habit.
-        chip.addEventListener("contextmenu", async (e) => {
+        top.addEventListener("contextmenu", async (e) => {
             e.preventDefault();
             if (confirm(`Delete habit "${h.name}"?`)) {
                 await deleteHabit(h.id);
@@ -55,9 +66,19 @@ function renderHabits(habits) {
             }
         });
 
-        chip.appendChild(box);
-        chip.appendChild(name);
-        habitsRow.appendChild(chip);
+        // --- GitHub-style day grid (last ~14 days, oldest -> today) ---
+        const grid = document.createElement("div");
+        grid.className = "habit-grid";
+        (h.history || []).forEach((d) => {
+            const cell = document.createElement("span");
+            cell.className = "grid-cell" + (d.done ? " on" : "");
+            cell.title = d.day;
+            grid.appendChild(cell);
+        });
+
+        card.appendChild(top);
+        card.appendChild(grid);
+        habitsRow.appendChild(card);
     });
 }
 

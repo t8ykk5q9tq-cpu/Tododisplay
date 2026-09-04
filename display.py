@@ -116,8 +116,22 @@ def read_items(list_type):
         return []
 
 
+def _habit_streak(days_set):
+    """Consecutive-day streak ending today (or yesterday if today not done)."""
+    if not days_set:
+        return 0
+    from datetime import timedelta
+    today = datetime.now().date()
+    start = today if today.isoformat() in days_set else today - timedelta(days=1)
+    streak, d = 0, start
+    while d.isoformat() in days_set:
+        streak += 1
+        d -= timedelta(days=1)
+    return streak
+
+
 def read_habits():
-    """Read habits from the DB. A habit is 'done' if last_done == today.
+    """Read habits from the DB with today's done-state and current streak.
     Returns [] if the table isn't there yet."""
     if not os.path.exists(DB_PATH):
         return []
@@ -126,10 +140,21 @@ def read_habits():
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT name, last_done FROM habits ORDER BY position, id"
+            "SELECT id, name FROM habits ORDER BY position, id"
         ).fetchall()
+        result = []
+        for r in rows:
+            logs = conn.execute(
+                "SELECT day FROM habit_log WHERE habit_id = ?", (r["id"],)
+            ).fetchall()
+            days = {lr["day"] for lr in logs}
+            result.append({
+                "name": r["name"],
+                "done": today in days,
+                "streak": _habit_streak(days),
+            })
         conn.close()
-        return [{"name": r["name"], "done": (r["last_done"] == today)} for r in rows]
+        return result
     except sqlite3.Error:
         return []
 
@@ -296,6 +321,11 @@ def draw_habits(screen, fonts, rect, habits):
             sy = cy + name_surf.get_height() // 2
             pygame.draw.line(screen, DONE_COLOR, (name_x, sy),
                              (name_x + name_surf.get_width(), sy), 2)
+        # Streak count next to the name (e.g. "5d") when there's an active streak.
+        streak = hb.get("streak", 0)
+        if streak > 0:
+            streak_surf = fonts["tiny"].render(f"{streak}d", True, HEADER_COLOR)
+            screen.blit(streak_surf, (name_x + name_surf.get_width() + 8, cy + 3))
 
 
 def draw_tracker(screen, fonts, rect, tracker):
