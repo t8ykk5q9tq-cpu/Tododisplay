@@ -42,7 +42,7 @@ async function buildWidget() {
   const header = w.addText("Time Tracker");
   header.font = Font.boldSystemFont(13);
   header.textColor = ACCENT;
-  w.addSpacer(6);
+  w.addSpacer(8);
 
   if (status === null) {
     const err = w.addText("Can't reach Pi");
@@ -54,75 +54,77 @@ async function buildWidget() {
     return w;
   }
 
-  // Time of the last check-in (more useful than a countdown that goes stale).
+  const fmtTime = (ts) =>
+    new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
   const all = status.recent || [];
   const last = all.length ? all[all.length - 1] : null;
 
+  // Determine the big "last check-in" display.
   let bigText, labelText, bigColor;
   if (status.notification_pending) {
     bigText = "Check in!";
     labelText = "tap to log";
     bigColor = ALERT;
-  } else if (!status.is_awake) {
-    bigText = last
-      ? new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : "Sleeping";
-    labelText = "sleeping - reminders paused";
-    bigColor = MUTED;
   } else if (last) {
-    bigText = new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    labelText = "last check-in";
-    bigColor = WHITE;
+    bigText = fmtTime(last.timestamp);
+    labelText = status.is_awake ? "last check-in" : "last (sleeping)";
+    bigColor = status.is_awake ? WHITE : MUTED;
   } else {
     bigText = "--:--";
-    labelText = "no check-ins yet";
+    labelText = status.is_awake ? "no check-ins yet" : "sleeping";
     bigColor = MUTED;
   }
 
-  const cd = w.addText(bigText);
-  cd.font = Font.boldSystemFont(size === "small" ? 26 : 34);
+  // --- Two-column body: left = last check-in, right = past check-ins ---
+  const body = w.addStack();
+  body.topAlignContent();
+
+  // LEFT column
+  const left = body.addStack();
+  left.layoutVertically();
+
+  const cd = left.addText(bigText);
+  cd.font = Font.boldSystemFont(size === "small" ? 24 : 32);
   cd.textColor = bigColor;
 
-  const label = w.addText(labelText);
+  const label = left.addText(labelText);
   label.font = Font.systemFont(11);
   label.textColor = MUTED;
 
-  // Show what the last check-in was (small widget has no room for the list below).
   if (last && !status.notification_pending) {
-    const lastText = w.addText(last.text);
-    lastText.font = Font.systemFont(size === "small" ? 11 : 12);
+    left.addSpacer(4);
+    const lastText = left.addText(last.text);
+    lastText.font = Font.mediumSystemFont(size === "small" ? 12 : 13);
     lastText.textColor = ACCENT;
-    lastText.lineLimit = size === "small" ? 2 : 1;
+    lastText.lineLimit = 2;
   }
 
-  // Earlier check-ins (medium/large only). Skip the most recent one since it's
-  // already shown as the "last check-in" above.
+  // RIGHT column (medium/large only — small has no room)
   if (size !== "small") {
-    w.addSpacer(8);
-    const earlier = (status.recent || []).slice(0, -1).reverse(); // newest first, excl. last
-    const maxRows = size === "large" ? 5 : 2;
-    const title = w.addText("Earlier");
-    title.font = Font.systemFont(9);
-    title.textColor = MUTED;
-    w.addSpacer(3);
+    body.addSpacer(14);
+    const right = body.addStack();
+    right.layoutVertically();
+
+    const rTitle = right.addText("Recent");
+    rTitle.font = Font.systemFont(9);
+    rTitle.textColor = MUTED;
+    right.addSpacer(4);
+
+    // Past check-ins, newest first, excluding the one shown on the left.
+    const earlier = all.slice(0, -1).reverse();
+    const maxRows = size === "large" ? 6 : 4;
     if (earlier.length === 0) {
-      const none = w.addText("—");
+      const none = right.addText("—");
       none.font = Font.systemFont(11);
       none.textColor = MUTED;
     } else {
       for (const e of earlier.slice(0, maxRows)) {
-        const row = w.addStack();
-        row.spacing = 6;
-        const d = new Date(e.timestamp);
-        const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const tEl = row.addText(t);
-        tEl.font = Font.systemFont(11);
-        tEl.textColor = ACCENT;
-        const xEl = row.addText(e.text);
-        xEl.font = Font.systemFont(11);
-        xEl.textColor = WHITE;
-        xEl.lineLimit = 1;
-        w.addSpacer(2);
+        const t = right.addText(`${fmtTime(e.timestamp)}  ${e.text}`);
+        t.font = Font.systemFont(11);
+        t.textColor = WHITE;
+        t.lineLimit = 1;
+        right.addSpacer(3);
       }
     }
   }
