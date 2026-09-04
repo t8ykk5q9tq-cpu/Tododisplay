@@ -25,8 +25,8 @@ TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 
 # --- Weather (Open-Meteo: free, no API key needed) ---
 # Set your location via env vars; defaults below can be edited.
-WEATHER_LAT = os.environ.get("WEATHER_LAT", "40.7128")   # default: NYC
-WEATHER_LON = os.environ.get("WEATHER_LON", "-74.0060")
+WEATHER_LAT = os.environ.get("WEATHER_LAT", "44.9778")   # default: Minneapolis, MN
+WEATHER_LON = os.environ.get("WEATHER_LON", "-93.2650")
 WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")  # or "celsius"
 _weather = {"text": None}  # updated by a background thread
 _weather_lock = threading.Lock()
