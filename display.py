@@ -171,31 +171,41 @@ WARN_COLOR = (233, 69, 96)     # red for warnings (under-voltage, etc.)
 
 REFRESH_SECONDS = 5            # how often to re-read the database
 
-# --- Rotating quotes (shown small above the clock, changes every few minutes) ---
+# --- Daily Stoic quote (one per day, changes at midnight) ---
 QUOTES = [
-    "Small steps every day.",
-    "Done is better than perfect.",
-    "You don't have to be great to start.",
-    "Discipline is choosing what you want most over what you want now.",
-    "Consistency beats intensity.",
-    "The best time to start was yesterday. The next best is now.",
-    "Progress, not perfection.",
-    "One thing at a time.",
-    "Show up, especially when you don't feel like it.",
-    "Little by little, a little becomes a lot.",
-    "Motivation gets you going; habit keeps you growing.",
-    "Focus on the next right thing.",
-    "A year from now you'll wish you started today.",
-    "Water. Stretch. Breathe.",
-    "Make it easy to do the right thing.",
+    "You have power over your mind - not outside events. - Marcus Aurelius",
+    "We suffer more in imagination than in reality. - Seneca",
+    "It's not what happens to you, but how you react that matters. - Epictetus",
+    "Waste no more time arguing what a good man should be. Be one. - Marcus Aurelius",
+    "Luck is what happens when preparation meets opportunity. - Seneca",
+    "No man is free who is not master of himself. - Epictetus",
+    "The happiness of your life depends on the quality of your thoughts. - Marcus Aurelius",
+    "He who fears death will never do anything worthy of a living man. - Seneca",
+    "First say to yourself what you would be; then do what you must do. - Epictetus",
+    "The best revenge is not to be like your enemy. - Marcus Aurelius",
+    "Difficulties strengthen the mind, as labor does the body. - Seneca",
+    "Wealth consists not in having great possessions, but in having few wants. - Epictetus",
+    "Confine yourself to the present. - Marcus Aurelius",
+    "Begin at once to live, and count each separate day as a separate life. - Seneca",
+    "Don't explain your philosophy. Embody it. - Epictetus",
+    "The soul becomes dyed with the color of its thoughts. - Marcus Aurelius",
+    "While we wait for life, life passes. - Seneca",
+    "It is not death that a man should fear, but never beginning to live. - Marcus Aurelius",
+    "Man conquers the world by conquering himself. - Zeno of Citium",
+    "How long are you going to wait before you demand the best for yourself? - Epictetus",
+    "If it is not right, do not do it; if it is not true, do not say it. - Marcus Aurelius",
+    "We are more often frightened than hurt; our troubles spring more from supposition than reality. - Seneca",
+    "Circumstances don't make the man, they only reveal him to himself. - Epictetus",
+    "Very little is needed to make a happy life. - Marcus Aurelius",
+    "As is a tale, so is life: not how long it is, but how good it is. - Seneca",
 ]
-QUOTE_ROTATE_SECONDS = 5 * 60  # switch quote every 5 minutes
 
 
 def current_quote():
-    """Pick a quote that rotates over time (deterministic, no per-frame cost)."""
-    idx = int(time.time() // QUOTE_ROTATE_SECONDS) % len(QUOTES)
-    return QUOTES[idx]
+    """Return today's Stoic quote. The same quote shows all day and rotates
+    to the next one at midnight (deterministic from the date, no per-frame cost)."""
+    day_number = int(time.time() // 86400)   # days since epoch
+    return QUOTES[day_number % len(QUOTES)]
 
 # Rotation in degrees: 0 (landscape), 90, 180, or 270.
 # Set via env var, e.g.  ROTATE=90 ./start-lite.sh
@@ -740,11 +750,24 @@ def main():
                          (margin, cursor_y, sw - 2 * margin, tracker_h),
                          tracker_data)
 
-        # Rotating quote in its own panel (above the clock).
+        # Daily Stoic quote in its own panel (above the clock). Stoic quotes can
+        # be long, so shrink the font to fit the panel width on one line.
         quote_y = sh - clock_h + 4
         qbar = pygame.Rect(margin, quote_y, sw - 2 * margin, quote_h)
         pygame.draw.rect(canvas, PANEL_COLOR, qbar, border_radius=12)
-        quote_surf = fonts["clock"].render(current_quote(), True, HEADER_COLOR)
+        qtext = current_quote()
+        avail_w = qbar.width - 24
+        qfont = fonts["clock"]
+        quote_surf = qfont.render(qtext, True, HEADER_COLOR)
+        if quote_surf.get_width() > avail_w:
+            # Fall back to the smaller "tiny" font; still too wide -> truncate.
+            qfont = fonts["tiny"]
+            quote_surf = qfont.render(qtext, True, HEADER_COLOR)
+            if quote_surf.get_width() > avail_w:
+                t = qtext
+                while quote_surf.get_width() > avail_w and len(t) > 6:
+                    t = t[:-2]
+                    quote_surf = qfont.render(t + "\u2026", True, HEADER_COLOR)
         canvas.blit(quote_surf,
                     (margin + (qbar.width - quote_surf.get_width()) // 2,
                      quote_y + (quote_h - quote_surf.get_height()) // 2))
