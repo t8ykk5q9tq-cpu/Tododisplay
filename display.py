@@ -68,7 +68,7 @@ def read_tracker():
     try:
         with open(TRACKER_LOG) as f:
             entries = json.load(f)
-        recent = entries[-4:]
+        recent = entries[-8:]
     except (OSError, json.JSONDecodeError):
         pass
 
@@ -325,11 +325,12 @@ def main():
         clock_h = fonts["clock"].get_height() + 20
 
         # Reserve a band for the time tracker (only if it's set up). Its height
-        # scales with the screen and fits the header + up to ~4 recent check-ins.
+        # scales with the screen and fits the header + recent check-ins.
+        # (~75% taller than the original so more check-ins are visible.)
         tracker_h = 0
         if tracker_data is not None:
-            tracker_h = int((fonts["item"].get_height() + 8) * 4
-                            + fonts["clock"].get_height() + 44)
+            tracker_h = int(((fonts["item"].get_height() + 8) * 4
+                             + fonts["clock"].get_height() + 44) * 1.75)
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
         # height shrinks to leave room for the tracker band + clock below.
