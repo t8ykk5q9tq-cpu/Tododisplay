@@ -112,8 +112,17 @@ def log_entry(text, extra=None):
 # ---------- state ----------
 
 notification_pending = Event()
-next_checkin_time = time.time() + INTERVAL
-is_awake = load_state().get("is_awake", True)
+
+# Restore timer state across restarts so the auto-updater relaunching the app
+# does NOT reset your check-in countdown. Resume the saved next check-in time
+# if it's still in the future; otherwise start a fresh interval.
+_saved = load_state()
+is_awake = _saved.get("is_awake", True)
+_saved_next = _saved.get("next_checkin_time")
+if isinstance(_saved_next, (int, float)) and _saved_next > time.time():
+    next_checkin_time = _saved_next
+else:
+    next_checkin_time = time.time() + INTERVAL
 
 
 # ---------- background threads ----------
