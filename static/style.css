@@ -350,11 +350,11 @@ body {
     background: #3c4048;   /* GitHub-style gray empty day */
 }
 
-/* Cyan intensity levels for completed days */
-.grid-cell.on1 { background: #004a5c; }
-.grid-cell.on2 { background: #00829c; }
-.grid-cell.on3 { background: #00b4d6; }
-.grid-cell.on4 { background: #00d4ff; }
+/* Bright cyan intensity levels for completed days (brightened to pop) */
+.grid-cell.on1 { background: #00c8f0; }
+.grid-cell.on2 { background: #50e1ff; }
+.grid-cell.on3 { background: #96f0ff; }
+.grid-cell.on4 { background: #d2faff; }
 
 @media (max-width: 640px) {
     .habits-panel { margin: 1rem 1rem 0 1rem; padding: 0.9rem 1rem; }
