@@ -28,7 +28,7 @@ TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 WEATHER_LAT = os.environ.get("WEATHER_LAT", "44.9778")   # default: Minneapolis, MN
 WEATHER_LON = os.environ.get("WEATHER_LON", "-93.2650")
 WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")  # or "celsius"
-_weather = {"text": None}  # updated by a background thread
+_weather = {"text": None, "precip": None, "sun": None}  # updated by bg thread
 _weather_lock = threading.Lock()
 
 # Open-Meteo weather codes -> short description.
@@ -43,15 +43,23 @@ WEATHER_CODES = {
 }
 
 
+# Weather codes that count as precipitation for the alert line.
+PRECIP_CODES = {51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77,
+                80, 81, 82, 85, 86, 95, 96, 99}
+SNOW_CODES = {71, 73, 75, 77, 85, 86}
+
+
 def weather_thread():
     """Fetch weather every 15 minutes in the background so a slow or missing
-    network never blocks the display."""
+    network never blocks the display. Also pulls sunrise/sunset and today's
+    precipitation so the display can show a sun line and a precip alert."""
     unit = "fahrenheit" if WEATHER_UNITS.startswith("f") else "celsius"
     url = (
         "https://api.open-meteo.com/v1/forecast?"
         f"latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
         "&current=temperature_2m,weather_code"
-        "&daily=temperature_2m_max,temperature_2m_min"
+        "&daily=temperature_2m_max,temperature_2m_min,weather_code,"
+        "precipitation_probability_max,sunrise,sunset"
         f"&temperature_unit={unit}&timezone=auto&forecast_days=1"
     )
     deg = "F" if unit == "fahrenheit" else "C"
@@ -67,16 +75,75 @@ def weather_thread():
             hi = round(daily.get("temperature_2m_max", [None])[0])
             lo = round(daily.get("temperature_2m_min", [None])[0])
             text = f"{temp}\u00b0{deg}  {desc}   H:{hi}\u00b0  L:{lo}\u00b0"
+
+            # Precip alert: use today's max precip probability + daily code.
+            precip = None
+            day_code = (daily.get("weather_code") or [None])[0]
+            prob = (daily.get("precipitation_probability_max") or [None])[0]
+            if day_code in PRECIP_CODES and prob and prob >= 30:
+                kind = "Snow" if day_code in SNOW_CODES else "Rain"
+                precip = f"{kind} likely today ({prob}%)"
+
+            # Sunrise/sunset -> short "HH:MM AM" strings.
+            sun = None
+            try:
+                sr = daily.get("sunrise", [None])[0]
+                ss = daily.get("sunset", [None])[0]
+                if sr and ss:
+                    sr_t = datetime.fromisoformat(sr).strftime("%I:%M %p").lstrip("0")
+                    ss_t = datetime.fromisoformat(ss).strftime("%I:%M %p").lstrip("0")
+                    sun = f"Sunrise {sr_t}   Sunset {ss_t}"
+            except (ValueError, TypeError):
+                pass
+
             with _weather_lock:
                 _weather["text"] = text
+                _weather["precip"] = precip
+                _weather["sun"] = sun
         except Exception:
             pass  # keep last value; try again next cycle
         time.sleep(15 * 60)
 
 
-def get_weather_text():
+def get_weather():
+    """Return (text, precip_alert_or_None, sun_line_or_None)."""
     with _weather_lock:
-        return _weather["text"]
+        return _weather["text"], _weather["precip"], _weather["sun"]
+
+
+# --- Under-voltage monitoring (Raspberry Pi power health) ---
+# vcgencmd get_throttled returns a hex bitmask. Bit 0 = under-voltage NOW,
+# bit 16 = under-voltage has occurred since boot.
+_power = {"warn": None}  # None = ok/unknown, str = warning text
+_power_lock = threading.Lock()
+
+
+def power_thread():
+    """Check the Pi's throttling status every 60s. If under-voltage is/has been
+    detected, expose a short warning string for the display."""
+    import subprocess
+    while True:
+        warn = None
+        try:
+            out = subprocess.run(["vcgencmd", "get_throttled"],
+                                 capture_output=True, text=True, timeout=5)
+            # Output looks like: "throttled=0x50005"
+            val = out.stdout.strip().split("=")[-1]
+            bits = int(val, 16)
+            if bits & 0x1:
+                warn = "Low power - check power supply"
+            elif bits & 0x10000:
+                warn = "Under-voltage detected earlier"
+        except Exception:
+            warn = None  # vcgencmd not available (e.g. not on a Pi) -> no warning
+        with _power_lock:
+            _power["warn"] = warn
+        time.sleep(60)
+
+
+def get_power_warning():
+    with _power_lock:
+        return _power["warn"]
 
 # --- Appearance ---
 BG_COLOR = (26, 26, 46)        # dark navy
@@ -85,8 +152,35 @@ HEADER_COLOR = (0, 212, 255)   # cyan
 TEXT_COLOR = (234, 234, 234)   # off-white
 DONE_COLOR = (120, 120, 130)   # grey for completed
 CLOCK_COLOR = (110, 110, 120)
+WARN_COLOR = (233, 69, 96)     # red for warnings (under-voltage, etc.)
 
 REFRESH_SECONDS = 5            # how often to re-read the database
+
+# --- Rotating quotes (shown small above the clock, changes every few minutes) ---
+QUOTES = [
+    "Small steps every day.",
+    "Done is better than perfect.",
+    "You don't have to be great to start.",
+    "Discipline is choosing what you want most over what you want now.",
+    "Consistency beats intensity.",
+    "The best time to start was yesterday. The next best is now.",
+    "Progress, not perfection.",
+    "One thing at a time.",
+    "Show up, especially when you don't feel like it.",
+    "Little by little, a little becomes a lot.",
+    "Motivation gets you going; habit keeps you growing.",
+    "Focus on the next right thing.",
+    "A year from now you'll wish you started today.",
+    "Water. Stretch. Breathe.",
+    "Make it easy to do the right thing.",
+]
+QUOTE_ROTATE_SECONDS = 5 * 60  # switch quote every 5 minutes
+
+
+def current_quote():
+    """Pick a quote that rotates over time (deterministic, no per-frame cost)."""
+    idx = int(time.time() // QUOTE_ROTATE_SECONDS) % len(QUOTES)
+    return QUOTES[idx]
 
 # Rotation in degrees: 0 (landscape), 90, 180, or 270.
 # Set via env var, e.g.  ROTATE=90 ./start-lite.sh
@@ -458,8 +552,9 @@ def main():
     pygame.init()
     pygame.mouse.set_visible(False)
 
-    # Start fetching weather in the background (non-blocking).
+    # Start background monitors (non-blocking): weather + Pi power health.
     threading.Thread(target=weather_thread, daemon=True).start()
+    threading.Thread(target=power_thread, daemon=True).start()
 
     # Fullscreen at the display's native resolution
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
@@ -541,18 +636,43 @@ def main():
 
         gap = 24
         margin = 24
-        clock_h = fonts["clock"].get_height() + 20
+        # Bottom area holds a rotating quote line above the clock/date.
+        quote_h = fonts["tiny"].get_height() + 8
+        clock_h = fonts["clock"].get_height() + 20 + quote_h
 
-        # Weather bar across the top.
-        weather_text = get_weather_text()
-        weather_bar_h = fonts["clock"].get_height() + 20
+        # Weather bar across the top. Main line always shows; a sun line and
+        # (when expected) a highlighted precip alert line appear below it.
+        weather_text, precip_alert, sun_line = get_weather()
+        line_h = fonts["clock"].get_height()
+        tiny_h = fonts["tiny"].get_height()
+        weather_bar_h = line_h + 16
+        if sun_line:
+            weather_bar_h += tiny_h + 4
+        if precip_alert:
+            weather_bar_h += tiny_h + 4
         wbar = pygame.Rect(margin, margin, sw - 2 * margin, weather_bar_h)
         pygame.draw.rect(canvas, PANEL_COLOR, wbar, border_radius=12)
+
+        wy = margin + 8
         w_surf = fonts["clock"].render(
             weather_text if weather_text else "Weather unavailable",
             True, TEXT_COLOR if weather_text else DONE_COLOR)
-        canvas.blit(w_surf, (margin + (wbar.width - w_surf.get_width()) // 2,
-                             margin + (weather_bar_h - w_surf.get_height()) // 2))
+        canvas.blit(w_surf, (margin + (wbar.width - w_surf.get_width()) // 2, wy))
+        wy += line_h + 4
+        if sun_line:
+            s_surf = fonts["tiny"].render(sun_line, True, DONE_COLOR)
+            canvas.blit(s_surf, (margin + (wbar.width - s_surf.get_width()) // 2, wy))
+            wy += tiny_h + 4
+        if precip_alert:
+            p_surf = fonts["tiny"].render(precip_alert, True, HEADER_COLOR)
+            canvas.blit(p_surf, (margin + (wbar.width - p_surf.get_width()) // 2, wy))
+            wy += tiny_h + 4
+
+        # Under-voltage warning: a red flag in the weather bar's top-left corner.
+        power_warn = get_power_warning()
+        if power_warn:
+            pw_surf = fonts["tiny"].render("\u26a0 " + power_warn, True, WARN_COLOR)
+            canvas.blit(pw_surf, (margin + 12, margin + 6))
 
         # Everything below the weather bar starts here.
         top = margin + weather_bar_h + gap
@@ -604,17 +724,22 @@ def main():
                          (margin, cursor_y, sw - 2 * margin, tracker_h),
                          tracker_data)
 
+        # Rotating quote line (small, just above the clock).
+        quote_surf = fonts["tiny"].render(current_quote(), True, HEADER_COLOR)
+        quote_x = (sw - quote_surf.get_width()) // 2
+        canvas.blit(quote_surf, (quote_x, sh - clock_h + 4))
+
         # Clock / date at the bottom (centered)
         stamp = time.strftime("%A, %B %d   -   %I:%M %p")
         clock_surf = fonts["clock"].render(stamp, True, CLOCK_COLOR)
         clock_x = (sw - clock_surf.get_width()) // 2
-        canvas.blit(clock_surf, (clock_x, sh - clock_h + 4))
+        canvas.blit(clock_surf, (clock_x, sh - clock_h + 4 + quote_h))
 
         # "Last updated" timestamp in the bottom-right corner (cached on refresh).
         if update_str:
             upd_surf = fonts["tiny"].render(update_str, True, DONE_COLOR)
             canvas.blit(upd_surf, (sw - margin - upd_surf.get_width(),
-                                   sh - clock_h + 6))
+                                   sh - clock_h + 6 + quote_h))
 
         # Rotate the canvas onto the physical screen if needed.
         if canvas is not screen:
