@@ -33,7 +33,10 @@ def get_db():
     return conn
 
 
-DEFAULT_HABITS = ["Gym", "Water", "Read", "Meds"]
+DEFAULT_HABITS = ["Gym", "Water", "Breakfast", "Lunch", "Dinner", "Work"]
+# The original placeholder set, used to detect a fresh install that still has
+# the old untouched defaults so we can migrate it to the new list.
+OLD_DEFAULT_HABITS = ["Gym", "Water", "Read", "Meds"]
 
 
 def init_db():
@@ -61,9 +64,13 @@ def init_db():
         )
         """
     )
-    # Seed default habits only if the table is empty.
-    count = conn.execute("SELECT COUNT(*) FROM habits").fetchone()[0]
-    if count == 0:
+    # Seed default habits if the table is empty. Also migrate an existing
+    # install that still has ONLY the old untouched placeholder set, so the
+    # new default list takes effect without wiping any habits you've added.
+    existing = [r["name"] for r in
+                conn.execute("SELECT name FROM habits ORDER BY position, id").fetchall()]
+    if not existing or existing == OLD_DEFAULT_HABITS:
+        conn.execute("DELETE FROM habits")
         for i, name in enumerate(DEFAULT_HABITS):
             conn.execute(
                 "INSERT INTO habits (name, position) VALUES (?, ?)", (name, i)
