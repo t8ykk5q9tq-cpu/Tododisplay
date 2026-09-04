@@ -305,6 +305,19 @@ def trigger():
     return jsonify({"status": "triggered"})
 
 
+@app.route("/habit-reminder-test", methods=["GET", "POST"])
+def habit_reminder_test():
+    """Fire the evening habit reminder right now, for testing."""
+    pending = unchecked_habits_today()
+    if pending:
+        names = ", ".join(pending)
+        send_pushover(f"{len(pending)} habit(s) left today: {names}",
+                      title="Habit reminder")
+        return jsonify({"sent": True, "pending": pending})
+    return jsonify({"sent": False, "pending": [],
+                    "message": "All habits done today - nothing to send."})
+
+
 # ---------- main ----------
 
 if __name__ == "__main__":
