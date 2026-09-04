@@ -33,7 +33,7 @@ def get_db():
     return conn
 
 
-DEFAULT_HABITS = ["Gym", "Water", "Breakfast", "Lunch", "Dinner", "Work"]
+DEFAULT_HABITS = ["Gym", "Water", "Work", "Breakfast", "Lunch", "Dinner"]
 # The original placeholder set, used to detect a fresh install that still has
 # the old untouched defaults so we can migrate it to the new list.
 OLD_DEFAULT_HABITS = ["Gym", "Water", "Read", "Meds"]
@@ -86,6 +86,14 @@ def init_db():
             conn.execute(
                 "INSERT INTO habits (name, position) VALUES (?, ?)", (name, i)
             )
+    # One-time reorder: put Work top-right and Breakfast bottom-left.
+    # Only applies if the habit set matches, so it won't disturb custom setups.
+    desired_order = ["Gym", "Water", "Work", "Breakfast", "Lunch", "Dinner"]
+    current = [r["name"] for r in
+               conn.execute("SELECT name FROM habits ORDER BY position, id").fetchall()]
+    if sorted(current) == sorted(desired_order) and current != desired_order:
+        for i, name in enumerate(desired_order):
+            conn.execute("UPDATE habits SET position = ? WHERE name = ?", (i, name))
     conn.commit()
     conn.close()
 
