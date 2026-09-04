@@ -90,26 +90,40 @@ update_loop() {
         fi
         echo "----- $(date) check -----" >> "$LOG"
 
-        BEFORE=$(git rev-parse HEAD 2>/dev/null)
-        # Fetch only (cheap) to see if remote moved, then pull if so.
+        # Fetch only (cheap) to see if the remote moved.
         git fetch >> "$LOG" 2>&1
         LOCAL=$(git rev-parse HEAD 2>/dev/null)
         REMOTE=$(git rev-parse '@{u}' 2>/dev/null)
 
-        if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
-            echo "New version found ($LOCAL -> $REMOTE). Updating." >> "$LOG"
-            git reset --hard >> "$LOG" 2>&1
-            git pull >> "$LOG" 2>&1
-            echo "Restarting display with new code." >> "$LOG"
-            # Relaunch this script (it kills existing instances on startup),
-            # preserving the current environment (ROTATE, etc.).
+        if [ -z "$REMOTE" ] || [ "$LOCAL" = "$REMOTE" ]; then
+            echo "No changes." >> "$LOG"
+            continue
+        fi
+
+        echo "New version found ($LOCAL -> $REMOTE)." >> "$LOG"
+
+        # What files changed between our version and the new one?
+        CHANGED=$(git diff --name-only "$LOCAL" "$REMOTE" 2>/dev/null)
+        echo "Changed files:" >> "$LOG"
+        echo "$CHANGED" >> "$LOG"
+
+        # Pull the new code.
+        git reset --hard >> "$LOG" 2>&1
+        git pull >> "$LOG" 2>&1
+
+        # Decide whether a restart is needed. Only files that actually RUN on
+        # the Pi require restarting the display/services. Phone-only files
+        # (scriptable/, README, images) are pulled quietly with no restart.
+        # Pattern matches the files/dirs that affect the running display.
+        if echo "$CHANGED" | grep -Eq '^(display\.py|tracker\.py|app\.py|start-lite\.sh|stop\.sh|templates/|static/|tracker_config\.py|requirements\.txt)'; then
+            echo "Runtime files changed - restarting display." >> "$LOG"
             DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" \
                 nohup bash "$SCRIPT_DIR/start-lite.sh" >> "$LOG" 2>&1 &
             # Stop this (old) instance; the new one takes over.
             kill "$SERVER_PID" "$TRACKER_PID" "$DISPLAY_PID" 2>/dev/null
             exit 0
         else
-            echo "No changes." >> "$LOG"
+            echo "Only non-runtime files changed - pulled, no restart." >> "$LOG"
         fi
     done
 }
