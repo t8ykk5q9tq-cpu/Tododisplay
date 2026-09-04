@@ -346,10 +346,14 @@ body {
     width: 14px;
     height: 14px;
     border-radius: 3px;
-    background: #1a2a4a;   /* empty day */
+    background: #3c4048;   /* GitHub-style gray empty day */
 }
 
-.grid-cell.on { background: #00d4ff; }  /* completed day */
+/* GitHub-style green intensity levels for completed days */
+.grid-cell.on1 { background: #0e4429; }
+.grid-cell.on2 { background: #006d32; }
+.grid-cell.on3 { background: #26a641; }
+.grid-cell.on4 { background: #39d353; }
 
 @media (max-width: 640px) {
     .habits-panel { margin: 1rem 1rem 0 1rem; padding: 0.9rem 1rem; }

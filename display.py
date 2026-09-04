@@ -295,9 +295,16 @@ def draw_panel(screen, fonts, rect, title, items):
         screen.blit(empty_surf, (x + pad, line_y))
 
 
-GRID_EMPTY = (26, 42, 74)   # dark cell (missed / no data)
-CARD_COLOR = (15, 52, 96)   # #0f3460 - matches the phone habit cards
+CARD_COLOR = (15, 52, 96)     # #0f3460 - matches the phone habit cards
 STREAK_COLOR = (255, 183, 3)  # amber, like the phone's fire streak
+# GitHub-style heatmap palette: gray for missed, greens for done (by intensity).
+GH_EMPTY = (60, 64, 72)       # #3c4048 - gray empty cell
+GH_GREENS = [
+    (14, 68, 41),    # darkest green
+    (0, 109, 50),
+    (38, 166, 65),
+    (57, 211, 83),   # brightest green
+]
 
 
 def draw_habits(screen, fonts, rect, habits):
@@ -320,11 +327,11 @@ def draw_habits(screen, fonts, rect, habits):
     card_w = (w - 2 * pad - (cols - 1) * gap) // cols
     card_h = (h - 2 * pad - (rows - 1) * gap) // rows if rows else (h - 2 * pad)
 
-    # Grid geometry: one clean row of cells spanning the card width.
+    # Grid geometry: one clean row of square cells, left-aligned in the card.
     ncells = len(habits[0].get("history", [])) if habits else HABIT_GRID_DAYS
-    cell_gap = 4
-    # Size cells to fill the card width in a single row (capped to fit height).
-    cell = max(10, min(18, (card_w - 2 * cpad - (ncells - 1) * cell_gap) // ncells))
+    cell_gap = 5
+    # Square cells sized to fit the card width; capped so they stay tidy squares.
+    cell = max(10, min(20, (card_w - 2 * cpad - (ncells - 1) * cell_gap) // ncells))
 
     for i, hb in enumerate(habits):
         r, c = divmod(i, cols)
@@ -359,11 +366,21 @@ def draw_habits(screen, fonts, rect, habits):
                         (cx + card_w - cpad - streak_surf.get_width(), by + 2))
 
         # --- Day grid below the header (single row, oldest -> today) ---
+        # GitHub heatmap style: gray for missed, greens for done. Intensity
+        # grows with the current run of consecutive done-days (brighter = hotter).
         gx = cx + cpad
-        gy = by + box + 8
-        for j, on in enumerate(hb.get("history", [])):
+        gy = by + box + 10
+        history = hb.get("history", [])
+        run = 0
+        for j, on in enumerate(history):
             px = gx + j * (cell + cell_gap)
-            color = HEADER_COLOR if on else GRID_EMPTY
+            if on:
+                run += 1
+                shade = GH_GREENS[min(run - 1, len(GH_GREENS) - 1)]
+                color = shade
+            else:
+                run = 0
+                color = GH_EMPTY
             pygame.draw.rect(screen, color, pygame.Rect(px, gy, cell, cell),
                              border_radius=3)
 

@@ -67,11 +67,19 @@ function renderHabits(habits) {
         });
 
         // --- GitHub-style day grid (last ~14 days, oldest -> today) ---
+        // Green intensity grows with the current run of consecutive done-days.
         const grid = document.createElement("div");
         grid.className = "habit-grid";
+        let run = 0;
         (h.history || []).forEach((d) => {
             const cell = document.createElement("span");
-            cell.className = "grid-cell" + (d.done ? " on" : "");
+            if (d.done) {
+                run += 1;
+                cell.className = "grid-cell on" + Math.min(run, 4);
+            } else {
+                run = 0;
+                cell.className = "grid-cell";
+            }
             cell.title = d.day;
             grid.appendChild(cell);
         });
