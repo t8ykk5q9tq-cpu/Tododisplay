@@ -1,192 +1,190 @@
 # Todo Display
 
-A fullscreen display board for a Raspberry Pi that shows a **todo list** and **shopping list** side by side on a connected monitor. Designed to run as a kiosk — always on, always visible.
+A self-contained information board for a Raspberry Pi, shown fullscreen on a
+connected monitor (portrait). It shows a **todo list**, **shopping list**, a
+**daily habit tracker** with streaks, a **time tracker**, **weather**, and a
+**daily Stoic quote** — all in a dark theme. You interact with it from any
+device (phone/laptop) over your network or Tailscale.
 
-![Dark themed two-panel layout with clock]
+Built for a low-RAM board (Pi Zero 2 W): it draws directly to the screen with
+pygame — no browser, no desktop chrome needed. It self-updates from GitHub,
+recovers dropped Wi-Fi, and restarts any service that crashes.
 
 ## Features
 
-- Two-panel layout: Todo list + Shopping list
-- Add, complete (tap to toggle), and delete items
-- Dark theme optimized for always-on displays
-- Date and time display
-- Auto-refreshes every 30 seconds
-- Launches Chromium in kiosk mode (fullscreen, no browser chrome)
-- Systemd service for auto-start on boot
-- SQLite storage — no external database needed
+- **Todo + Shopping lists** — add / complete (tap to toggle, strike-through) / delete
+- **Habit tracker** — daily habits with a GitHub-style contribution heatmap and streak counts; auto-resets each day
+- **Time tracker** — 30-min check-in reminders via Pushover; recent check-ins + next-check-in countdown on screen
+- **Weather bar** — current temp/conditions, high/low, sunrise/sunset, and a precip alert when rain/snow is likely
+- **Daily Stoic quote** — one per day, changes at midnight (offline, built-in)
+- **Clock + "last updated"** timestamp (from the last code change)
+- **Portrait layout** via screen rotation
+- **Self-updating** — pulls new code from GitHub every 10 minutes (only restarts when files that run on the Pi change)
+- **Wi-Fi watchdog** — reconnects automatically if the network drops
+- **Service supervisor** — relaunches the server / tracker / display if any crashes
+- **Under-voltage warning** — flags low power on screen
+- SQLite + JSON storage — no external database
 
 ## Requirements
 
-- Raspberry Pi (any model with a desktop environment)
-- Raspberry Pi OS with desktop (Bookworm or Bullseye)
-- Python 3.9+
-- Chromium browser (pre-installed on Pi OS)
-- A connected monitor/TV
+- Raspberry Pi (developed on a Pi Zero 2 W) running Raspberry Pi OS with desktop
+- `python3`, `python3-flask`, `python3-pygame` (installed via apt — lighter than pip on a Zero 2 W)
+- A connected monitor (mounted portrait)
 
 ## Quick Start
 
-### 1. Copy the project to your Pi
+### 1. Get the project onto the Pi
 
 ```bash
-# From your development machine:
-scp -r Tododisplay/ pi@raspberrypi.local:~/Tododisplay/
-
-# Or clone from your repo:
-git clone <your-repo-url> ~/Tododisplay
+git clone https://github.com/t8ykk5q9tq-cpu/Tododisplay.git ~/Tododisplay
 ```
 
-### 2. Run it
+### 2. Install dependencies (once)
+
+```bash
+sudo apt update
+sudo apt install -y python3-flask python3-pygame
+```
+
+### 3. Run it
+
+Launch detached so it survives closing SSH (and Ctrl+C):
 
 ```bash
 cd ~/Tododisplay
-./start.sh
+DISPLAY=:0 ROTATE=90 nohup bash start-lite.sh > run.log 2>&1 &
 ```
 
-This will:
-- Create a Python virtual environment
-- Install Flask
-- Start the web server on port 5000
-- Open Chromium in fullscreen kiosk mode
-
-### 3. Stop it
-
-```bash
-./stop.sh
-```
+`ROTATE=90` gives the portrait layout (use `270` if the monitor is turned the
+other way). Stop everything with `bash stop.sh`.
 
 ## Auto-Start on Boot
 
-To have the display launch automatically when the Pi boots:
+So the board comes up on its own after a reboot/power blip (and isn't tied to
+your SSH session):
 
 ```bash
-# Copy the service file
-sudo cp tododisplay.service /etc/systemd/system/
-
-# Enable and start
-sudo systemctl enable tododisplay
-sudo systemctl start tododisplay
+mkdir -p ~/.config/autostart
+cp ~/Tododisplay/tododisplay.desktop ~/.config/autostart/
 ```
 
-**Note:** The service file assumes the project lives at `/home/pi/Tododisplay` and runs as user `pi`. Edit `tododisplay.service` if your setup differs.
+The `.desktop` entry runs `ROTATE=90 bash start-lite.sh` on desktop login.
 
-## Managing Items from Another Device
+## Managing It From Your Phone / Laptop
 
-Since the server runs on port 5000, you can access it from any device on the same network:
+Lists + habits:  `http://<pi>:5000`
+Time tracker:    `http://<pi>:5050`
 
-```
-http://raspberrypi.local:5000
-```
+On the same Wi-Fi use the Pi's LAN IP (or `raspberrypi.local`). From anywhere,
+use **Tailscale** — install it on the Pi and your phone, then use the Pi's
+Tailscale address (e.g. `http://100.67.122.101:5000`). Add either page to your
+phone's home screen for one-tap access. There are also Scriptable widgets and
+Shortcuts in the `scriptable/` folder.
 
-Or use the Pi's IP address:
+## Configuration (environment variables)
 
-```
-http://192.168.x.x:5000
-```
+Set these on the launch line, e.g. `ROTATE=90 ITEM_PT=34 bash start-lite.sh`:
 
-This lets you add/remove items from your phone or laptop while the Pi displays them on the monitor.
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `ROTATE` | 0 | Screen rotation: 0/90/180/270 (90 = portrait) |
+| `TITLE_PT` / `ITEM_PT` / `CLOCK_PT` | auto | Font sizes |
+| `WEATHER_LAT` / `WEATHER_LON` | Minneapolis | Weather location |
+| `WEATHER_UNITS` | fahrenheit | `fahrenheit` or `celsius` |
+| `WEATHER_TEST_PRECIP` | (unset) | Force a precip alert for testing |
+| `AUTO_UPDATE` | 1 | Auto-pull from GitHub every 10 min |
+| `UPDATE_INTERVAL` | 600 | Seconds between update checks |
+| `WIFI_WATCHDOG` | 1 | Auto-reconnect Wi-Fi if it drops |
+| `WATCHDOG_INTERVAL` | 120 | Seconds between connectivity checks |
+| `WIFI_CONN` | netplan-wlan0-S232 Home Wifi | NetworkManager connection name |
+| `AUTO_RESTART` | 1 | Relaunch crashed services |
 
 ## Project Structure
 
 ```
 Tododisplay/
-├── app.py                 # Flask server + REST API
-├── requirements.txt       # Python dependencies
-├── start.sh               # Launch script (server + kiosk browser)
-├── stop.sh                # Stop script
-├── tododisplay.service    # Systemd unit for auto-start
-├── lists.db               # SQLite database (created on first run)
-└── static/
-    ├── index.html         # Frontend page
-    ├── style.css          # Dark theme styles
-    └── app.js             # Client-side logic
+├── app.py                    # Flask server: lists + habits API (port 5000)
+├── tracker.py                # Flask time-tracker service (port 5050)
+├── display.py                # pygame fullscreen display (the board itself)
+├── start-lite.sh             # Launches server + tracker + display; update loop,
+│                             #   Wi-Fi watchdog, and service supervisor
+├── stop.sh                   # Stops everything
+├── update.sh                 # (Standalone) pull + restart if changed
+├── tododisplay.desktop       # Boot autostart entry
+├── tracker_config.example.py # Copy to tracker_config.py and fill in secrets
+├── templates/tracker.html    # Tracker check-in page
+├── static/                   # Lists + habits web page (index.html, app.js, style.css)
+├── scriptable/               # iOS Scriptable widgets + Shortcuts docs + icon
+├── lists.db                  # Lists + habits (gitignored)
+└── tracker_log.json/.json    # Tracker data (gitignored)
 ```
+
+## Time Tracker Setup
+
+Copy the example config and fill in your details (kept out of git):
+
+```bash
+cp tracker_config.example.py tracker_config.py
+nano tracker_config.py
+```
+
+- `PUSHOVER_USER` / `PUSHOVER_TOKEN` — phone push reminders (blank = disabled)
+- `GMAIL_FROM` / `GMAIL_PASS` / `RECIPIENT` — optional daily email (Gmail App Password)
+- `CHECKIN_INTERVAL_MIN` — minutes between check-ins (default 30)
+- `HABIT_REMINDER_HOUR` — evening reminder about unchecked habits (default 20 / 8pm; -1 to disable)
+
+**`tracker_config.py` is gitignored** — this repo is public, so never put keys elsewhere.
 
 ## API
 
+Lists (port 5000):
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/items/todo` | Get all todo items |
-| GET | `/api/items/shopping` | Get all shopping items |
-| POST | `/api/items/todo` | Add a todo item (`{"text": "..."}`) |
-| POST | `/api/items/shopping` | Add a shopping item (`{"text": "..."}`) |
-| PATCH | `/api/items/:id/toggle` | Toggle done state |
-| DELETE | `/api/items/:id` | Delete an item |
-| DELETE | `/api/items/todo/clear-done` | Remove completed todos |
-| DELETE | `/api/items/shopping/clear-done` | Remove completed shopping items |
+| GET | `/api/items/<todo\|shopping>` | List items |
+| POST | `/api/items/<todo\|shopping>` | Add item `{"text": "..."}` |
+| PATCH | `/api/items/:id/toggle` | Toggle done |
+| DELETE | `/api/items/:id` | Delete item |
+| DELETE | `/api/items/<type>/clear-done` | Clear completed |
+| GET | `/api/habits` | Habits with done/streak/history |
+| POST | `/api/habits` | Add habit `{"name": "..."}` |
+| PATCH | `/api/habits/:id/toggle` | Toggle today's completion |
+| DELETE | `/api/habits/:id` | Delete habit |
 
-## Tips
+Tracker (port 5050):
 
-- **Hide the cursor:** Install `unclutter` to hide the mouse pointer after inactivity:
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/status` | Countdown, awake state, recent check-ins |
+| POST | `/log` | Log a check-in `{"text": "..."}` |
+| POST | `/wake` / `/sleep` | Resume / pause reminders |
+| POST | `/trigger` | Test check-in notification |
+| GET/POST | `/habit-reminder-test` | Fire the habit reminder now (testing) |
+
+## Troubleshooting
+
+- **Wi-Fi keeps dropping / asks for password again:** disable Wi-Fi power saving
+  (the watchdog recovers drops, but this prevents them):
   ```bash
-  sudo apt install unclutter
+  echo -e "[connection]\nwifi.powersave = 2" | sudo tee /etc/NetworkManager/conf.d/wifi-powersave.conf
+  sudo systemctl restart NetworkManager
+  iw dev wlan0 get power_save   # should say: off
   ```
-  Add `@unclutter -idle 3` to `~/.config/lxsession/LXDE-pi/autostart`.
+- **Weather says "unavailable":** the Pi can't reach the internet — check Wi-Fi.
+  It retries every 60s once back online.
+- **Screen blanks after a while:** disable blanking via `sudo raspi-config`
+  (Display Options → Screen Blanking → Off).
+- **Under-voltage warning on screen:** the Pi needs a stronger 5V/2.5A supply.
+- **Check logs:** `update.log` (updates), `watchdog.log` (Wi-Fi + crashes), `run.log` (launch).
 
-- **Disable screen blanking:** Prevent the monitor from sleeping:
-  ```bash
-  sudo raspi-config
-  # Navigate to: Display Options > Screen Blanking > Off
-  ```
+## Updating
 
-- **Rotate display:** If your monitor is mounted vertically, add to `/boot/config.txt`:
-  ```
-  display_rotate=1
-  ```
+Edit code on your dev machine and `git push`. The Pi pulls it within 10 minutes
+and restarts only if a file that runs on the Pi changed. To force an update now:
 
-## Time Tracker (optional add-on)
-
-A built-in time tracker runs alongside the lists. Every 30 minutes it can ping
-your phone (via Pushover) asking what you've been up to. You log check-ins from
-your phone, and the Pi's display shows a **Time Tracker** band under the lists
-with the next check-in countdown and your most recent check-ins.
-
-It runs as a **separate Flask service on port 5050**, started automatically by
-`start-lite.sh`. It works even without any configuration — notifications just
-stay off until you set them up.
-
-### Setup
-
-1. Copy the example config and fill in your details:
-   ```bash
-   cp tracker_config.example.py tracker_config.py
-   nano tracker_config.py
-   ```
-   - `PUSHOVER_USER` / `PUSHOVER_TOKEN` — for phone push reminders (leave blank to disable)
-   - `GMAIL_FROM` / `GMAIL_PASS` / `RECIPIENT` — for the optional daily email summary (use a Gmail App Password)
-   - `CHECKIN_INTERVAL_MIN` — minutes between reminders (default 30)
-
-   **`tracker_config.py` is gitignored** so your secrets never get committed
-   (this repo is public). Do not put keys anywhere else in the project.
-
-2. That's it — `start-lite.sh` launches the tracker automatically. Restart:
-   ```bash
-   bash stop.sh
-   ROTATE=90 bash start-lite.sh
-   ```
-
-### Using it from your phone
-
-Over Tailscale, open:
+```bash
+cd ~/Tododisplay
+git reset --hard && git pull
+bash stop.sh
+DISPLAY=:0 ROTATE=90 nohup bash start-lite.sh > run.log 2>&1 &
 ```
-http://100.67.122.101:5050
-```
-(or `http://<pi>:5050` on home Wi-Fi). You can log a check-in, see recent ones,
-and toggle Sleep/Wake to pause reminders overnight. Add it to your home screen
-for one-tap access, just like the lists page.
-
-### What shows on the Pi display
-
-Under the todo and shopping lists, a band shows:
-- **Time Tracker** header with a live `next: MM:SS` countdown (or "Sleeping")
-- Your last few check-ins, newest first, with timestamps
-
-The display reads the tracker's data files directly, so it stays in sync without
-any extra network calls. The band only appears once the tracker has run at least
-once (it creates `tracker_log.json` / `tracker_state.json`, both gitignored).
-
-### Ports summary
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| Lists   | 5000 | Todo + shopping web interface |
-| Tracker | 5050 | Time-tracker check-in interface |
