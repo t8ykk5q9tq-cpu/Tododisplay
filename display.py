@@ -297,13 +297,13 @@ def draw_panel(screen, fonts, rect, title, items):
 
 CARD_COLOR = (15, 52, 96)     # #0f3460 - matches the phone habit cards
 STREAK_COLOR = (255, 183, 3)  # amber, like the phone's fire streak
-# GitHub-style heatmap palette: gray for missed, greens for done (by intensity).
+# Heatmap palette: gray for missed, cyan shades for done (by intensity).
 GH_EMPTY = (60, 64, 72)       # #3c4048 - gray empty cell
 GH_GREENS = [
-    (14, 68, 41),    # darkest green
-    (0, 109, 50),
-    (38, 166, 65),
-    (57, 211, 83),   # brightest green
+    (0, 74, 92),     # darkest cyan
+    (0, 130, 156),
+    (0, 180, 214),
+    (0, 212, 255),   # brightest cyan (matches HEADER_COLOR)
 ]
 
 
