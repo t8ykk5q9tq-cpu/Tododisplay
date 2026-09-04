@@ -1,5 +1,5 @@
 // TrackerWidget.js — Scriptable (iOS) home-screen widget for the Time Tracker.
-// Shows the next check-in countdown and your recent check-ins, over Tailscale.
+// Shows the time of your last check-in and recent check-ins, over Tailscale.
 //
 // SETUP:
 //   1. PI_HOST is set to your Pi's Tailscale address + tracker port (5050).
@@ -29,12 +29,6 @@ async function fetchStatus() {
   }
 }
 
-function fmtCountdown(secs) {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
 async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const w = new ListWidget();
@@ -60,34 +54,63 @@ async function buildWidget() {
     return w;
   }
 
-  // Countdown / status line
-  const cd = w.addText(
-    !status.is_awake ? "Sleeping"
-      : status.notification_pending ? "Check in!"
-      : fmtCountdown(Math.max(0, status.next_checkin_in))
-  );
-  cd.font = Font.boldSystemFont(size === "small" ? 26 : 34);
-  cd.textColor = status.notification_pending ? ALERT : WHITE;
+  // Time of the last check-in (more useful than a countdown that goes stale).
+  const all = status.recent || [];
+  const last = all.length ? all[all.length - 1] : null;
 
-  const label = w.addText(
-    !status.is_awake ? "reminders paused"
-      : status.notification_pending ? "tap to log"
-      : "until next check-in"
-  );
+  let bigText, labelText, bigColor;
+  if (status.notification_pending) {
+    bigText = "Check in!";
+    labelText = "tap to log";
+    bigColor = ALERT;
+  } else if (!status.is_awake) {
+    bigText = last
+      ? new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "Sleeping";
+    labelText = "sleeping - reminders paused";
+    bigColor = MUTED;
+  } else if (last) {
+    bigText = new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    labelText = "last check-in";
+    bigColor = WHITE;
+  } else {
+    bigText = "--:--";
+    labelText = "no check-ins yet";
+    bigColor = MUTED;
+  }
+
+  const cd = w.addText(bigText);
+  cd.font = Font.boldSystemFont(size === "small" ? 26 : 34);
+  cd.textColor = bigColor;
+
+  const label = w.addText(labelText);
   label.font = Font.systemFont(11);
   label.textColor = MUTED;
 
-  // Recent check-ins (medium/large only — small has no room)
+  // Show what the last check-in was (small widget has no room for the list below).
+  if (last && !status.notification_pending) {
+    const lastText = w.addText(last.text);
+    lastText.font = Font.systemFont(size === "small" ? 11 : 12);
+    lastText.textColor = ACCENT;
+    lastText.lineLimit = size === "small" ? 2 : 1;
+  }
+
+  // Earlier check-ins (medium/large only). Skip the most recent one since it's
+  // already shown as the "last check-in" above.
   if (size !== "small") {
     w.addSpacer(8);
-    const recent = (status.recent || []).slice().reverse(); // newest first
-    const maxRows = size === "large" ? 6 : 3;
-    if (recent.length === 0) {
-      const none = w.addText("No check-ins yet");
+    const earlier = (status.recent || []).slice(0, -1).reverse(); // newest first, excl. last
+    const maxRows = size === "large" ? 5 : 2;
+    const title = w.addText("Earlier");
+    title.font = Font.systemFont(9);
+    title.textColor = MUTED;
+    w.addSpacer(3);
+    if (earlier.length === 0) {
+      const none = w.addText("—");
       none.font = Font.systemFont(11);
       none.textColor = MUTED;
     } else {
-      for (const e of recent.slice(0, maxRows)) {
+      for (const e of earlier.slice(0, maxRows)) {
         const row = w.addStack();
         row.spacing = 6;
         const d = new Date(e.timestamp);
