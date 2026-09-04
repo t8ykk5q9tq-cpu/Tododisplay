@@ -96,12 +96,22 @@ def weather_thread():
             except (ValueError, TypeError):
                 pass
 
+            # Test override: set WEATHER_TEST_PRECIP to force the alert text,
+            # e.g.  WEATHER_TEST_PRECIP="Snow likely today (80%)"
+            test_precip = os.environ.get("WEATHER_TEST_PRECIP")
+            if test_precip:
+                precip = test_precip
+
             with _weather_lock:
                 _weather["text"] = text
                 _weather["precip"] = precip
                 _weather["sun"] = sun
         except Exception:
-            pass  # keep last value; try again next cycle
+            # Fetch failed; still honor the test override so it's always visible.
+            test_precip = os.environ.get("WEATHER_TEST_PRECIP")
+            if test_precip:
+                with _weather_lock:
+                    _weather["precip"] = test_precip
         time.sleep(15 * 60)
 
 
