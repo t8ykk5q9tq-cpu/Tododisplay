@@ -13,10 +13,11 @@ Copy tracker_config.example.py -> tracker_config.py and fill it in.
 import json
 import os
 import smtplib
+import sqlite3
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from threading import Event, Thread
@@ -35,13 +36,17 @@ except ImportError:
         RECIPIENT = ""
         CHECKIN_INTERVAL_MIN = 30
         FOLLOWUP_MIN = 5
+        HABIT_REMINDER_HOUR = 20  # 8pm
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tracker_log.json")
 STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
+DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
 FOLLOWUP = int(getattr(cfg, "FOLLOWUP_MIN", 5)) * 60
+# Hour (0-23) to send the evening reminder about unchecked habits. -1 disables.
+HABIT_REMINDER_HOUR = int(getattr(cfg, "HABIT_REMINDER_HOUR", 20))
 
 app = Flask(__name__)
 
@@ -162,6 +167,48 @@ def midnight_email_thread():
         send_daily_email()
 
 
+def unchecked_habits_today():
+    """Return the names of habits NOT marked done today. [] if none / no DB."""
+    if not os.path.exists(DB_PATH):
+        return []
+    today = date.today().isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        habits = conn.execute(
+            "SELECT id, name FROM habits ORDER BY position, id"
+        ).fetchall()
+        done_ids = {
+            r["habit_id"] for r in conn.execute(
+                "SELECT habit_id FROM habit_log WHERE day = ?", (today,)
+            ).fetchall()
+        }
+        conn.close()
+        return [h["name"] for h in habits if h["id"] not in done_ids]
+    except sqlite3.Error:
+        return []
+
+
+def habit_reminder_thread():
+    """Once each evening at HABIT_REMINDER_HOUR, ping about unchecked habits."""
+    if HABIT_REMINDER_HOUR < 0:
+        return  # disabled
+    last_sent_day = None
+    while True:
+        now = datetime.now()
+        today = now.date().isoformat()
+        if now.hour == HABIT_REMINDER_HOUR and last_sent_day != today:
+            last_sent_day = today
+            pending = unchecked_habits_today()
+            if pending:
+                names = ", ".join(pending)
+                send_pushover(
+                    f"{len(pending)} habit(s) left today: {names}",
+                    title="Habit reminder",
+                )
+        time.sleep(60)  # check every minute
+
+
 def send_daily_email():
     if not cfg.GMAIL_FROM or not cfg.GMAIL_PASS or not cfg.RECIPIENT:
         return  # email disabled
@@ -264,5 +311,6 @@ if __name__ == "__main__":
     persist_runtime_state()  # so the display shows a countdown right away
     Thread(target=timer_thread, daemon=True).start()
     Thread(target=midnight_email_thread, daemon=True).start()
+    Thread(target=habit_reminder_thread, daemon=True).start()
     print("Time Tracker running on http://0.0.0.0:5050")
     app.run(host="0.0.0.0", port=5050, debug=False)

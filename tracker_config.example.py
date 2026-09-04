@@ -22,3 +22,8 @@ RECIPIENT = ""
 # --- Timing ---
 CHECKIN_INTERVAL_MIN = 30   # minutes between check-in reminders
 FOLLOWUP_MIN = 5            # follow-up reminder if you haven't responded
+
+# --- Habit reminder ---
+# Hour (0-23) to send an evening Pushover about habits not yet checked today.
+# Set to -1 to disable. Example: 20 = 8pm.
+HABIT_REMINDER_HOUR = 20
