@@ -130,7 +130,7 @@ def _habit_streak(days_set):
     return streak
 
 
-HABIT_GRID_DAYS = 14  # how many days of history to show on the display grid
+HABIT_GRID_DAYS = 7  # days of history shown on the display grid (one clean row)
 
 
 def read_habits():
@@ -320,13 +320,11 @@ def draw_habits(screen, fonts, rect, habits):
     card_w = (w - 2 * pad - (cols - 1) * gap) // cols
     card_h = (h - 2 * pad - (rows - 1) * gap) // rows if rows else (h - 2 * pad)
 
-    # Grid geometry: 7 columns like GitHub, cells sized to fit the card width.
-    gcols = 7
+    # Grid geometry: one clean row of cells spanning the card width.
     ncells = len(habits[0].get("history", [])) if habits else HABIT_GRID_DAYS
-    grows = (ncells + gcols - 1) // gcols
-    cell_gap = 3
-    # Cap the cell size so the grid height matches the reserved band height.
-    cell = max(6, min(16, (card_w - 2 * cpad - (gcols - 1) * cell_gap) // gcols))
+    cell_gap = 4
+    # Size cells to fill the card width in a single row (capped to fit height).
+    cell = max(10, min(18, (card_w - 2 * cpad - (ncells - 1) * cell_gap) // ncells))
 
     for i, hb in enumerate(habits):
         r, c = divmod(i, cols)
@@ -360,16 +358,14 @@ def draw_habits(screen, fonts, rect, habits):
             screen.blit(streak_surf,
                         (cx + card_w - cpad - streak_surf.get_width(), by + 2))
 
-        # --- Day grid below the header ---
+        # --- Day grid below the header (single row, oldest -> today) ---
         gx = cx + cpad
         gy = by + box + 8
         for j, on in enumerate(hb.get("history", [])):
-            gr, gc = divmod(j, gcols)
-            px = gx + gc * (cell + cell_gap)
-            py = gy + gr * (cell + cell_gap)
+            px = gx + j * (cell + cell_gap)
             color = HEADER_COLOR if on else GRID_EMPTY
-            pygame.draw.rect(screen, color, pygame.Rect(px, py, cell, cell),
-                             border_radius=2)
+            pygame.draw.rect(screen, color, pygame.Rect(px, gy, cell, cell),
+                             border_radius=3)
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -543,9 +539,8 @@ def main():
             hcols = 3
             hrows = (len(habits_data) + hcols - 1) // hcols
             hdr = fonts["clock"].get_height() + 6      # header row height
-            grid_rows = (HABIT_GRID_DAYS + 6) // 7     # grid rows (7 per line)
-            cell_est = 16
-            card_h = hdr + 8 + grid_rows * (cell_est + 3) + 20
+            cell_est = 18                              # single grid row
+            card_h = hdr + 8 + cell_est + 20
             habits_h = hrows * card_h + (hrows - 1) * 12 + 2 * 16
 
         tracker_h = 0
