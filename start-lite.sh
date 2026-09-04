@@ -10,6 +10,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# PID of this main script, so background loops can restart the whole instance.
+MAIN_PID=$$
+
 # --- Python setup ---
 # We use the SYSTEM python (not a venv) so it can see the apt-installed pygame,
 # which is far lighter than pip-building pygame on a Zero 2 W.
@@ -119,8 +122,11 @@ update_loop() {
             echo "Runtime files changed - restarting display." >> "$LOG"
             DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" \
                 nohup bash "$SCRIPT_DIR/start-lite.sh" >> "$LOG" 2>&1 &
-            # Stop this (old) instance; the new one takes over.
-            kill "$SERVER_PID" "$TRACKER_PID" "$DISPLAY_PID" 2>/dev/null
+            # Stop the ENTIRE old instance so the supervisor doesn't race to
+            # relaunch the killed services. Killing the main script triggers its
+            # cleanup trap (which kills all children); the fresh instance we
+            # just launched with nohup takes over.
+            kill "$MAIN_PID" 2>/dev/null
             exit 0
         else
             echo "Only non-runtime files changed - pulled, no restart." >> "$LOG"
@@ -134,12 +140,87 @@ if [ "$AUTO_UPDATE" = "1" ]; then
     echo "Auto-update every ${UPDATE_INTERVAL}s (PID $UPDATE_PID)."
 fi
 
+# --- Wi-Fi watchdog ---
+# Every WATCHDOG_INTERVAL seconds, check connectivity. If it's down, re-kick
+# the Wi-Fi connection via nmcli so the Pi recovers without a manual reset.
+# Disable with WIFI_WATCHDOG=0.
+WIFI_WATCHDOG="${WIFI_WATCHDOG:-1}"
+WATCHDOG_INTERVAL="${WATCHDOG_INTERVAL:-120}"   # check every 2 minutes
+WIFI_CONN="${WIFI_CONN:-netplan-wlan0-S232 Home Wifi}"
+WLOG="$SCRIPT_DIR/watchdog.log"
+
+wifi_watchdog() {
+    set +e
+    while true; do
+        sleep "$WATCHDOG_INTERVAL"
+        # Consider us online if we can reach a reliable host. Try a couple.
+        if ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1 \
+           || ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+            continue  # online, nothing to do
+        fi
+        # Trim the log so it never grows unbounded.
+        if [ -f "$WLOG" ]; then
+            tail -n 200 "$WLOG" > "$WLOG.tmp" 2>/dev/null && mv "$WLOG.tmp" "$WLOG"
+        fi
+        echo "$(date) connectivity down - re-kicking Wi-Fi" >> "$WLOG"
+        # Bounce the Wi-Fi connection to force a reconnect.
+        nmcli connection up "$WIFI_CONN" >> "$WLOG" 2>&1 \
+            || nmcli device connect wlan0 >> "$WLOG" 2>&1
+        sleep 10
+        if ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+            echo "$(date) recovered" >> "$WLOG"
+        else
+            echo "$(date) still down after re-kick" >> "$WLOG"
+        fi
+    done
+}
+
+if [ "$WIFI_WATCHDOG" = "1" ]; then
+    wifi_watchdog &
+    WATCHDOG_PID=$!
+    echo "Wi-Fi watchdog every ${WATCHDOG_INTERVAL}s (PID $WATCHDOG_PID)."
+fi
+
 # Clean up all child processes when this script is stopped.
 cleanup() {
-    kill "$UPDATE_PID" 2>/dev/null
+    kill "$UPDATE_PID" "$WATCHDOG_PID" 2>/dev/null
     kill "$SERVER_PID" "$TRACKER_PID" "$DISPLAY_PID" 2>/dev/null
 }
 trap cleanup EXIT INT TERM
 
-# Keep the script alive while the server runs
-wait $SERVER_PID
+# --- Supervisor: keep the three services alive ---
+# If any of the server / tracker / display crashes, relaunch just that one.
+# Disable with AUTO_RESTART=0.
+AUTO_RESTART="${AUTO_RESTART:-1}"
+
+start_display() {
+    if [ -n "$DISPLAY" ] || [ -S /tmp/.X11-unix/X0 ]; then
+        DISPLAY="${DISPLAY:-:0}" ROTATE="${ROTATE:-0}" $PYTHON display.py &
+    else
+        SDL_VIDEODRIVER=fbcon SDL_FBDEV=/dev/fb0 ROTATE="${ROTATE:-0}" $PYTHON display.py &
+    fi
+    DISPLAY_PID=$!
+}
+
+if [ "$AUTO_RESTART" = "1" ]; then
+    while true; do
+        sleep 10
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "$(date) list server died - restarting" >> "$WLOG"
+            $PYTHON app.py &
+            SERVER_PID=$!
+        fi
+        if ! kill -0 "$TRACKER_PID" 2>/dev/null; then
+            echo "$(date) tracker died - restarting" >> "$WLOG"
+            $PYTHON tracker.py &
+            TRACKER_PID=$!
+        fi
+        if ! kill -0 "$DISPLAY_PID" 2>/dev/null; then
+            echo "$(date) display died - restarting" >> "$WLOG"
+            start_display
+        fi
+    done
+else
+    # Auto-restart disabled: just keep the script alive on the server.
+    wait $SERVER_PID
+fi
