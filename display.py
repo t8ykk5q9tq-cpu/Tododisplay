@@ -11,7 +11,9 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import time
+import urllib.request
 from datetime import datetime
 
 import pygame
@@ -20,6 +22,61 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lists.db")
 TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
+
+# --- Weather (Open-Meteo: free, no API key needed) ---
+# Set your location via env vars; defaults below can be edited.
+WEATHER_LAT = os.environ.get("WEATHER_LAT", "40.7128")   # default: NYC
+WEATHER_LON = os.environ.get("WEATHER_LON", "-74.0060")
+WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")  # or "celsius"
+_weather = {"text": None}  # updated by a background thread
+_weather_lock = threading.Lock()
+
+# Open-Meteo weather codes -> short description.
+WEATHER_CODES = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
+    61: "Rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain",
+    67: "Freezing rain", 71: "Snow", 73: "Snow", 75: "Heavy snow",
+    77: "Snow", 80: "Showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Snow showers", 95: "Thunderstorm",
+    96: "Thunderstorm", 99: "Thunderstorm",
+}
+
+
+def weather_thread():
+    """Fetch weather every 15 minutes in the background so a slow or missing
+    network never blocks the display."""
+    unit = "fahrenheit" if WEATHER_UNITS.startswith("f") else "celsius"
+    url = (
+        "https://api.open-meteo.com/v1/forecast?"
+        f"latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
+        "&current=temperature_2m,weather_code"
+        "&daily=temperature_2m_max,temperature_2m_min"
+        f"&temperature_unit={unit}&timezone=auto&forecast_days=1"
+    )
+    deg = "F" if unit == "fahrenheit" else "C"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = json.load(resp)
+            cur = data.get("current", {})
+            daily = data.get("daily", {})
+            temp = round(cur.get("temperature_2m"))
+            code = cur.get("weather_code", 0)
+            desc = WEATHER_CODES.get(code, "")
+            hi = round(daily.get("temperature_2m_max", [None])[0])
+            lo = round(daily.get("temperature_2m_min", [None])[0])
+            text = f"{temp}\u00b0{deg}  {desc}   H:{hi}\u00b0  L:{lo}\u00b0"
+            with _weather_lock:
+                _weather["text"] = text
+        except Exception:
+            pass  # keep last value; try again next cycle
+        time.sleep(15 * 60)
+
+
+def get_weather_text():
+    with _weather_lock:
+        return _weather["text"]
 
 # --- Appearance ---
 BG_COLOR = (26, 26, 46)        # dark navy
@@ -244,6 +301,9 @@ def main():
     pygame.init()
     pygame.mouse.set_visible(False)
 
+    # Start fetching weather in the background (non-blocking).
+    threading.Thread(target=weather_thread, daemon=True).start()
+
     # Fullscreen at the display's native resolution
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     pygame.display.set_caption("List Display")
@@ -324,6 +384,20 @@ def main():
         margin = 24
         clock_h = fonts["clock"].get_height() + 20
 
+        # Weather bar across the top.
+        weather_text = get_weather_text()
+        weather_bar_h = fonts["clock"].get_height() + 20
+        wbar = pygame.Rect(margin, margin, sw - 2 * margin, weather_bar_h)
+        pygame.draw.rect(canvas, PANEL_COLOR, wbar, border_radius=12)
+        w_surf = fonts["clock"].render(
+            weather_text if weather_text else "Weather unavailable",
+            True, TEXT_COLOR if weather_text else DONE_COLOR)
+        canvas.blit(w_surf, (margin + (wbar.width - w_surf.get_width()) // 2,
+                             margin + (weather_bar_h - w_surf.get_height()) // 2))
+
+        # Everything below the weather bar starts here.
+        top = margin + weather_bar_h + gap
+
         # Reserve a band for the time tracker (only if it's set up). Its height
         # scales with the screen and fits the header + recent check-ins.
         # (~75% taller than the original so more check-ins are visible.)
@@ -333,19 +407,19 @@ def main():
                              + fonts["clock"].get_height() + 44) * 1.75)
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
-        # height shrinks to leave room for the tracker band + clock below.
+        # height shrinks to leave room for the weather bar, tracker band + clock.
         panel_w = (sw - 2 * margin - gap) // 2
-        panel_h = sh - 2 * margin - clock_h - tracker_h - (gap if tracker_h else 0)
+        panel_h = sh - top - margin - clock_h - tracker_h - (gap if tracker_h else 0)
         draw_panel(canvas, fonts,
-                   (margin, margin, panel_w, panel_h),
+                   (margin, top, panel_w, panel_h),
                    "Todo List", todo_items)
         draw_panel(canvas, fonts,
-                   (margin + panel_w + gap, margin, panel_w, panel_h),
+                   (margin + panel_w + gap, top, panel_w, panel_h),
                    "Shopping List", shopping_items)
 
         # Time-tracker band, between the lists and the clock.
         if tracker_data is not None:
-            tracker_y = margin + panel_h + gap
+            tracker_y = top + panel_h + gap
             draw_tracker(canvas, fonts,
                          (margin, tracker_y, sw - 2 * margin, tracker_h),
                          tracker_data)
