@@ -106,13 +106,18 @@ def weather_thread():
                 _weather["text"] = text
                 _weather["precip"] = precip
                 _weather["sun"] = sun
+            # Success: next refresh in 15 minutes.
+            time.sleep(15 * 60)
+            continue
         except Exception:
             # Fetch failed; still honor the test override so it's always visible.
             test_precip = os.environ.get("WEATHER_TEST_PRECIP")
             if test_precip:
                 with _weather_lock:
                     _weather["precip"] = test_precip
-        time.sleep(15 * 60)
+            # Retry soon after a failure (e.g. Wi-Fi just came back) instead
+            # of waiting a full 15 minutes.
+            time.sleep(60)
 
 
 def get_weather():
