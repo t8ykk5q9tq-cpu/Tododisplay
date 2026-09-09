@@ -266,11 +266,15 @@ def add_entry():
 def status():
     remaining = max(0, next_checkin_time - time.time())
     entries = load_log()
+    # Only return TODAY's check-ins so the phone page (and display) reset at midnight.
+    today = date.today().isoformat()
+    todays = [e for e in entries
+              if str(e.get("timestamp", "")).startswith(today)]
     return jsonify({
         "notification_pending": notification_pending.is_set(),
         "next_checkin_in": int(remaining),
         "is_awake": is_awake,
-        "recent": entries[-5:],
+        "recent": todays[-5:],
     })
 
 
