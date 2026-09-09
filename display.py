@@ -297,7 +297,11 @@ def read_tracker():
     try:
         with open(TRACKER_LOG) as f:
             entries = json.load(f)
-        recent = entries[-8:]
+        # Only show TODAY's check-ins, so the display resets at midnight.
+        today = datetime.now().date().isoformat()
+        todays = [e for e in entries
+                  if str(e.get("timestamp", "")).startswith(today)]
+        recent = todays[-8:]
     except (OSError, json.JSONDecodeError):
         pass
 
