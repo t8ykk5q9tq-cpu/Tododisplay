@@ -39,6 +39,16 @@ COUNT_ONLY_CATEGORIES = ["TikTok", "YouTube"]
 # crosses this, you get one Pushover alert. Set to 0 to disable.
 APP_TIME_LIMIT_MIN = 60
 
+# --- Focus vs distraction (for the productive/distracting ratio) ---
+# By default Mac apps (prefix "Mac:") count as focus and TikTok/YouTube as
+# distraction. Add exact app names here to override/extend.
+FOCUS_APPS = []                       # e.g. ["Mac:Kiro", "Mac:Terminal"]
+DISTRACTION_APPS = ["TikTok", "YouTube"]
+
+# --- End-of-day summary push ---
+# Hour (0-23) to send a Pushover recap of the day. Set to -1 to disable.
+DAILY_SUMMARY_HOUR = 21
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"

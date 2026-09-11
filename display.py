@@ -30,6 +30,16 @@ TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
 COUNT_ONLY_CATEGORIES = {"TikTok", "YouTube"}
 # Per-app daily time limit (minutes); over-limit apps display in red.
 APP_TIME_LIMIT_SEC = int(os.environ.get("APP_TIME_LIMIT_MIN", "60")) * 60
+DISTRACTION_APPS = {"TikTok", "YouTube"}
+
+
+def classify_app(name):
+    """'focus' for Mac apps, 'distraction' for TikTok/YouTube, else 'neutral'."""
+    if name in DISTRACTION_APPS:
+        return "distraction"
+    if name.startswith("Mac:"):
+        return "focus"
+    return "neutral"
 
 # --- Weather (Open-Meteo: free, no API key needed) ---
 # Set your location via env vars; defaults below can be edited.
@@ -417,6 +427,8 @@ def read_tracker():
 
     # App usage: real time spent + open count, from open/close sessions.
     app_opens = []
+    focus_stats = None
+    mac_week = []
     try:
         with open(APPUSE_FILE) as f:
             au = json.load(f)
@@ -436,8 +448,30 @@ def read_tracker():
         phone_rows = [r for r in rows if not r["category"].startswith("Mac:")]
         mac_rows = [r for r in rows if r["category"].startswith("Mac:")][:3]
         app_opens = phone_rows + mac_rows
+
+        # Focus vs distraction + longest focus streak (today).
+        focus_sec = sum(s for a, s in totals.items() if classify_app(a) == "focus")
+        distraction_sec = sum(s for a, s in totals.items()
+                              if classify_app(a) == "distraction")
+        longest_focus = au.get("focus_streak", {}).get(today, {}).get("longest", 0)
+        focus_stats = {"focus_sec": focus_sec, "distraction_sec": distraction_sec,
+                       "longest_focus_sec": longest_focus}
+
+        # Weekly Mac app trend: 7-day totals for Mac apps (top 3).
+        from datetime import timedelta
+        day_keys = [(datetime.now().date() - timedelta(days=i)).isoformat()
+                    for i in range(6, -1, -1)]
+        week_totals = {}
+        for dk in day_keys:
+            for a, s in au.get("totals", {}).get(dk, {}).items():
+                if a.startswith("Mac:"):
+                    week_totals[a] = week_totals.get(a, 0) + s
+        mac_week = sorted(
+            ({"app": a, "seconds": s} for a, s in week_totals.items()),
+            key=lambda r: -r["seconds"])[:3]
     except (OSError, json.JSONDecodeError):
-        pass
+        focus_stats = None
+        mac_week = []
 
     next_in = None
     is_awake = True
@@ -453,7 +487,8 @@ def read_tracker():
 
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
             "summary": summary, "app_opens": app_opens,
-            "total_today": total_today}
+            "total_today": total_today,
+            "focus_stats": focus_stats, "mac_week": mac_week}
 
 
 def last_update_str():
@@ -653,52 +688,82 @@ def draw_habits(screen, fonts, rect, habits):
                              border_radius=3)
 
 
-def draw_app_opens(screen, fonts, rect, app_opens):
-    """Draw the 'App Time' box: real time spent in each tracked app today
-    (from open/close sessions)."""
+def _fmt_hm(secs):
+    m = secs // 60
+    hh, mm = divmod(m, 60)
+    return f"{hh}h {mm}m" if hh else f"{mm}m"
+
+
+def draw_app_opens(screen, fonts, rect, tracker):
+    """Draw the 'App Time' box: focus/distraction summary, today's per-app time,
+    and a compact weekly Mac trend."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
     pad = 20
     title_surf = fonts["clock"].render("App Time", True, HEADER_COLOR)
     screen.blit(title_surf, (x + pad, y + pad))
 
-    line_y = y + pad + title_surf.get_height() + 10
-    # Each app uses TWO lines: the name, then "time  Nx" beneath it. This keeps
-    # everything readable in a narrow box with no overlapping text.
     name_font = fonts["item"]
     val_font = fonts["tiny"]
-    row_h = name_font.get_height() + val_font.get_height() + 12
     bottom = y + h - pad
+    line_y = y + pad + title_surf.get_height() + 10
+    max_w = w - 2 * pad
+
+    # --- Focus vs distraction summary line + longest streak ---
+    fs = tracker.get("focus_stats")
+    if fs and (fs["focus_sec"] or fs["distraction_sec"]):
+        fd_surf = val_font.render(
+            f"Focus {_fmt_hm(fs['focus_sec'])}  /  Distract {_fmt_hm(fs['distraction_sec'])}",
+            True, HEADER_COLOR)
+        screen.blit(fd_surf, (x + pad, line_y))
+        line_y += val_font.get_height() + 3
+        if fs["longest_focus_sec"]:
+            ls_surf = val_font.render(
+                f"Longest focus: {_fmt_hm(fs['longest_focus_sec'])}", True, DONE_COLOR)
+            screen.blit(ls_surf, (x + pad, line_y))
+            line_y += val_font.get_height() + 8
+
+    # --- Today's per-app time (name, then time + opens) ---
+    app_opens = tracker.get("app_opens", [])
+    row_h = name_font.get_height() + val_font.get_height() + 12
     if not app_opens:
-        empty = fonts["item"].render("None today", True, DONE_COLOR)
+        empty = name_font.render("None today", True, DONE_COLOR)
         screen.blit(empty, (x + pad, line_y))
-        return
+        line_y += row_h
     for a in app_opens:
         if line_y + row_h > bottom:
             break
-        secs = a.get("seconds", 0)
-        mins = secs // 60
-        hh, mm = divmod(mins, 60)
-        tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+        tstr = _fmt_hm(a.get("seconds", 0))
         opens = a.get("opens", 0)
         over = a.get("over_limit")
         name_color = WARN_COLOR if over else TEXT_COLOR
         val_color = WARN_COLOR if over else HEADER_COLOR
-
-        # Line 1: app name (truncated to fit the box width).
         name = a["category"]
-        max_w = w - 2 * pad
         name_surf = name_font.render(name, True, name_color)
         while name_surf.get_width() > max_w and len(name) > 3:
             name = name[:-2]
             name_surf = name_font.render(name + "\u2026", True, name_color)
         screen.blit(name_surf, (x + pad, line_y))
-
-        # Line 2: "13m   5x" (time + opens, spaced clearly).
         val_surf = val_font.render(f"{tstr}    {opens}\u00d7", True, val_color)
         screen.blit(val_surf, (x + pad, line_y + name_font.get_height() + 2))
-
         line_y += row_h
+
+    # --- Weekly Mac trend (if room) ---
+    mac_week = tracker.get("mac_week") or []
+    if mac_week and line_y + val_font.get_height() * (len(mac_week) + 1) + 10 < bottom:
+        line_y += 6
+        hdr = val_font.render("This week (Mac)", True, DONE_COLOR)
+        screen.blit(hdr, (x + pad, line_y))
+        line_y += val_font.get_height() + 4
+        for m in mac_week:
+            if line_y + val_font.get_height() > bottom:
+                break
+            nm = m["app"].replace("Mac:", "")
+            row = val_font.render(nm, True, TEXT_COLOR)
+            tv = val_font.render(_fmt_hm(m["seconds"]), True, HEADER_COLOR)
+            screen.blit(row, (x + pad, line_y))
+            screen.blit(tv, (x + w - pad - tv.get_width(), line_y))
+            line_y += val_font.get_height() + 3
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -1010,7 +1075,7 @@ def main():
                          tracker_data)
             draw_app_opens(canvas, fonts,
                            (margin + tracker_w + gap, cursor_y, apps_w, tracker_h),
-                           tracker_data.get("app_opens", []))
+                           tracker_data)
 
         # Daily Stoic quote in its own panel (above the clock). Stoic quotes can
         # be long, so shrink the font to fit the panel width on one line.

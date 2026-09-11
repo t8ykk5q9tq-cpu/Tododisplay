@@ -62,6 +62,27 @@ COUNT_ONLY_CATEGORIES = set(getattr(cfg, "COUNT_ONLY_CATEGORIES",
 # Daily per-app screen-time limit (minutes). Crossing it fires one Pushover
 # alert per app per day. Set to 0 to disable.
 APP_TIME_LIMIT_MIN = int(getattr(cfg, "APP_TIME_LIMIT_MIN", 60))
+
+# Focus vs distraction classification for the productive/distracting ratio.
+# By default: Mac apps (prefix "Mac:") count as focused work; the app-open
+# categories (TikTok/YouTube) count as distraction. Override in config with
+# FOCUS_APPS / DISTRACTION_APPS (exact names) if you want finer control.
+FOCUS_APPS = set(getattr(cfg, "FOCUS_APPS", []))
+DISTRACTION_APPS = set(getattr(cfg, "DISTRACTION_APPS",
+                                ["TikTok", "YouTube"]))
+# Hour (0-23) to send the end-of-day summary push. -1 disables.
+DAILY_SUMMARY_HOUR = int(getattr(cfg, "DAILY_SUMMARY_HOUR", 21))
+
+
+def classify_app(name):
+    """Return 'focus', 'distraction', or 'neutral' for an app/category name."""
+    if name in DISTRACTION_APPS:
+        return "distraction"
+    if name in FOCUS_APPS:
+        return "focus"
+    if name.startswith("Mac:"):
+        return "focus"
+    return "neutral"
 # The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
 # to the check-in page. Defaults to the Pi 5's Tailscale address; override in
 # tracker_config.py with PI_BASE_URL if it changes.
@@ -488,11 +509,105 @@ def active_batch():
     data = load_appuse()
     today = date.today().isoformat()
     day = data.setdefault("totals", {}).setdefault(today, {})
+    focus_secs = 0
+    distraction_secs = 0
     for name, secs in tallies.items():
         secs = max(1, min(secs, 3600))
         day[name] = day.get(name, 0) + secs
+        kind = classify_app(name)
+        if kind == "focus":
+            focus_secs += secs
+        elif kind == "distraction":
+            distraction_secs += secs
+    # Track the current + longest continuous focus streak today. A batch that
+    # had focus time and no distraction extends the streak; distraction breaks it.
+    streaks = data.setdefault("focus_streak", {}).setdefault(
+        today, {"current": 0, "longest": 0})
+    if distraction_secs > 0:
+        streaks["current"] = 0
+    elif focus_secs > 0:
+        streaks["current"] += focus_secs
+        streaks["longest"] = max(streaks["longest"], streaks["current"])
     save_appuse(data)  # single write for the whole batch
     return "ok"
+
+
+def focus_distraction_today():
+    """Return {'focus_sec', 'distraction_sec', 'longest_focus_sec'} for today."""
+    data = load_appuse()
+    today = date.today().isoformat()
+    totals = data.get("totals", {}).get(today, {})
+    focus = sum(s for a, s in totals.items() if classify_app(a) == "focus")
+    distraction = sum(s for a, s in totals.items()
+                      if classify_app(a) == "distraction")
+    longest = data.get("focus_streak", {}).get(today, {}).get("longest", 0)
+    return {"focus_sec": focus, "distraction_sec": distraction,
+            "longest_focus_sec": longest}
+
+
+def _fmt_dur(secs):
+    m = secs // 60
+    h, mm = divmod(m, 60)
+    return f"{h}h {mm}m" if h else f"{mm}m"
+
+
+def build_daily_summary():
+    """Compose the end-of-day summary text from all tracked data."""
+    today = date.today().isoformat()
+    parts = []
+
+    # App time (top few by time)
+    apps = app_usage_today()
+    if apps:
+        top = [f"{a['app']} {_fmt_dur(a['seconds'])}"
+               + ("!" if a.get("over_limit") else "")
+               for a in apps[:3] if a["seconds"] > 0]
+        if top:
+            parts.append("Apps: " + ", ".join(top))
+
+    # Focus vs distraction
+    fd = focus_distraction_today()
+    if fd["focus_sec"] or fd["distraction_sec"]:
+        parts.append(
+            f"Focus {_fmt_dur(fd['focus_sec'])} / "
+            f"Distraction {_fmt_dur(fd['distraction_sec'])}")
+        if fd["longest_focus_sec"]:
+            parts.append(f"Longest focus streak {_fmt_dur(fd['longest_focus_sec'])}")
+
+    # Habits done
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        habits = conn.execute("SELECT id, name FROM habits").fetchall()
+        done_ids = {r["habit_id"] for r in conn.execute(
+            "SELECT habit_id FROM habit_log WHERE day = ?", (today,)).fetchall()}
+        conn.close()
+        if habits:
+            done = sum(1 for h in habits if h["id"] in done_ids)
+            parts.append(f"Habits {done}/{len(habits)}")
+    except sqlite3.Error:
+        pass
+
+    # Check-ins
+    todays = [e for e in load_log() if str(e.get("timestamp", "")).startswith(today)]
+    if todays:
+        parts.append(f"{len(todays)} check-ins")
+
+    return "  |  ".join(parts) if parts else "No activity tracked today."
+
+
+def daily_summary_push_thread():
+    """Send the end-of-day summary once per day at DAILY_SUMMARY_HOUR."""
+    if DAILY_SUMMARY_HOUR < 0:
+        return
+    last_sent = None
+    while True:
+        now = datetime.now()
+        today = now.date().isoformat()
+        if now.hour == DAILY_SUMMARY_HOUR and last_sent != today:
+            last_sent = today
+            send_pushover(build_daily_summary(), title="Daily summary")
+        time.sleep(60)
 
 
 def app_usage_today():
@@ -584,6 +699,7 @@ def status():
         "app_usage": app_usage_today(),
         "app_week": app_usage_week(),
         "app_limit_min": APP_TIME_LIMIT_MIN,
+        "focus": focus_distraction_today(),
     })
 
 
@@ -633,6 +749,14 @@ def habit_reminder_test():
                     "message": "All habits done today - nothing to send."})
 
 
+@app.route("/daily-summary-test", methods=["GET", "POST"])
+def daily_summary_test():
+    """Send the end-of-day summary right now, for testing."""
+    text = build_daily_summary()
+    send_pushover(text, title="Daily summary")
+    return jsonify({"sent": True, "summary": text})
+
+
 # ---------- main ----------
 
 if __name__ == "__main__":
@@ -640,5 +764,6 @@ if __name__ == "__main__":
     Thread(target=timer_thread, daemon=True).start()
     Thread(target=midnight_email_thread, daemon=True).start()
     Thread(target=habit_reminder_thread, daemon=True).start()
+    Thread(target=daily_summary_push_thread, daemon=True).start()
     print("Time Tracker running on http://0.0.0.0:5050")
     app.run(host="0.0.0.0", port=5050, debug=False)

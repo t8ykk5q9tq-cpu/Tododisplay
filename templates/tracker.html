@@ -117,6 +117,12 @@
         <div id="summary"></div>
     </div>
 
+    <!-- Focus vs distraction -->
+    <div class="card">
+        <div class="recent-title">Focus vs Distraction</div>
+        <div id="focus-ratio"></div>
+    </div>
+
     <!-- App usage today (time + opens) -->
     <div class="card">
         <div class="recent-title">App Time - Today</div>
@@ -188,6 +194,25 @@
             const m = Math.floor(secs / 60);
             const h = Math.floor(m / 60), mm = m % 60;
             return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+
+        function renderFocus(fs) {
+            const el = document.getElementById("focus-ratio");
+            if (!fs || (!fs.focus_sec && !fs.distraction_sec)) {
+                el.innerHTML = '<div class="app-row"><span class="app-name">No data yet</span></div>';
+                return;
+            }
+            const f = fs.focus_sec, d = fs.distraction_sec, total = f + d || 1;
+            const fpct = Math.round((f / total) * 100);
+            el.innerHTML =
+                `<div class="app-row"><span class="app-name" style="color:#00d4ff">Focus</span>` +
+                `<span class="app-val">${fmtDur(f)}</span></div>` +
+                `<div class="app-row"><span class="app-name" style="color:#e94560">Distraction</span>` +
+                `<span style="color:#e94560">${fmtDur(d)}</span></div>` +
+                `<div style="height:10px;border-radius:5px;overflow:hidden;background:#e94560;margin:8px 0;">` +
+                `<div style="height:100%;width:${fpct}%;background:#00d4ff;"></div></div>` +
+                (fs.longest_focus_sec ?
+                 `<div class="sum-total">Longest focus streak: ${fmtDur(fs.longest_focus_sec)}</div>` : "");
         }
 
         function renderAppToday(usage) {
@@ -266,6 +291,7 @@
             buildQuickButtons(s.categories);
             renderRecent(s.recent);
             renderSummary(s.summary, s.total_checkins);
+            renderFocus(s.focus);
             renderAppToday(s.app_usage);
             renderAppWeek(s.app_week);
             updateCountdown();
