@@ -19,7 +19,7 @@
         .bar .weather { font-size: 1.1rem; }
         .bar .focus { color: #00d4ff; font-weight: 600; }
         .bar .net { font-size: 0.85rem; }
-        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; gap: 12px; overflow: hidden; min-height: 0; }
+        .grid { flex: 1; display: grid; grid-template-columns: 30% 1fr 1fr; gap: 12px; overflow: hidden; min-height: 0; }
         .panel {
             background: #16213e; border-radius: 14px; padding: 16px;
             display: flex; flex-direction: column; overflow: hidden; min-height: 0;
@@ -37,13 +37,16 @@
         #mac-week::-webkit-scrollbar-thumb, #checkins::-webkit-scrollbar-thumb {
             background: #2a2f4a; border-radius: 3px;
         }
-        /* Narrower screens: drop to 2 columns so panels stay readable. */
+        /* Narrower screens: drop columns so panels stay readable. */
         @media (max-width: 1100px) {
-            .grid { grid-template-columns: 1fr 1fr; }
+            .grid { grid-template-columns: 34% 1fr; }
         }
         @media (max-width: 640px) {
             .grid { grid-template-columns: 1fr; overflow-y: auto; }
         }
+        /* Lists column: Todo and Shopping share the height evenly. */
+        .lists-col .panel { overflow: hidden; }
+        .lists-col .list { max-height: none; }
         .habits { display: flex; flex-wrap: wrap; gap: 8px; }
         .habit { background: #0f3460; border-radius: 8px; padding: 6px 10px; font-size: 0.95rem; }
         .habit.done { color: #8a8a9a; text-decoration: line-through; }
@@ -97,13 +100,15 @@
     </div>
 
     <div class="grid">
-        <div class="panel">
-            <h2>Todo</h2>
-            <ul class="list" id="todo"></ul>
-        </div>
-        <div class="panel">
-            <h2>Shopping</h2>
-            <ul class="list" id="shopping"></ul>
+        <div class="col2 lists-col">
+            <div class="panel" style="flex:1 1 0">
+                <h2>Todo</h2>
+                <ul class="list" id="todo"></ul>
+            </div>
+            <div class="panel" style="flex:1 1 0">
+                <h2>Shopping</h2>
+                <ul class="list" id="shopping"></ul>
+            </div>
         </div>
         <div class="col2">
             <div class="panel" style="flex:0 0 auto">
