@@ -52,9 +52,10 @@ HABIT_REMINDER_HOUR = int(getattr(cfg, "HABIT_REMINDER_HOUR", 20))
 # Quick-pick categories for check-ins (buttons + tags + daily summary).
 CATEGORIES = list(getattr(cfg, "CATEGORIES",
                           ["Work", "Break", "Meal", "Errands", "Health", "Personal"]))
-# The Pi's reachable tracker URL (e.g. "http://100.102.96.42:5050"), used so
-# Pushover notification buttons can log a check-in directly. Blank = disabled.
-PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "")
+# The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
+# to the check-in page. Defaults to the Pi 5's Tailscale address; override in
+# tracker_config.py with PI_BASE_URL if it changes.
+PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "http://100.102.96.42:5050")
 
 app = Flask(__name__)
 
