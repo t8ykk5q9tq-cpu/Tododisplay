@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Board</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e; color: #eaeaea; height: 100vh; overflow: hidden;
+            display: flex; flex-direction: column; padding: 14px; gap: 12px;
+        }
+        .bar {
+            background: #16213e; border-radius: 12px; padding: 10px 16px;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0;
+        }
+        .bar .weather { font-size: 1.1rem; }
+        .bar .focus { color: #00d4ff; font-weight: 600; }
+        .bar .net { font-size: 0.85rem; }
+        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; overflow: hidden; }
+        .panel {
+            background: #16213e; border-radius: 14px; padding: 16px;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .panel h2 { color: #00d4ff; font-size: 1.2rem; margin-bottom: 10px; flex-shrink: 0; }
+        .list { list-style: none; overflow-y: auto; flex: 1; }
+        .list li { padding: 6px 0; font-size: 1rem; }
+        .list li.done { color: #8a8a9a; text-decoration: line-through; }
+        .col2 { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+        .habits { display: flex; flex-wrap: wrap; gap: 8px; }
+        .habit { background: #0f3460; border-radius: 8px; padding: 6px 10px; font-size: 0.95rem; }
+        .habit.done { color: #8a8a9a; text-decoration: line-through; }
+        .habit .box { display: inline-block; width: 14px; height: 14px; border: 2px solid #6a7290;
+            border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+        .habit.done .box { background: #00d4ff; border-color: #00d4ff; }
+        .tracker-head { display: flex; justify-content: space-between; align-items: baseline; }
+        .countdown { color: #eaeaea; }
+        .checkin { padding: 4px 0; font-size: 0.95rem; }
+        .checkin .t { color: #00d4ff; font-size: 0.8rem; margin-right: 6px; }
+        .app-row { display: flex; justify-content: space-between; padding: 4px 0; }
+        .app-row.over { color: #e94560; }
+        .app-time { color: #00d4ff; }
+        .app-row.over .app-time { color: #e94560; }
+        .app-opens { color: #8a8a9a; font-size: 0.8rem; margin-left: 8px; }
+        .empty { color: #8a8a9a; font-style: italic; }
+        .clock { text-align: center; color: #6a6a78; font-size: 0.85rem; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+    <div class="bar">
+        <span class="weather" id="weather">Weather...</span>
+        <span class="focus" id="focus"></span>
+        <span class="net" id="net"></span>
+    </div>
+
+    <div class="grid">
+        <div class="panel">
+            <h2>Todo</h2>
+            <ul class="list" id="todo"></ul>
+        </div>
+        <div class="panel">
+            <h2>Shopping</h2>
+            <ul class="list" id="shopping"></ul>
+        </div>
+        <div class="col2">
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Habits</h2>
+                <div class="habits" id="habits"></div>
+            </div>
+            <div class="panel" style="flex:1">
+                <div class="tracker-head">
+                    <h2>Time Tracker</h2>
+                    <span class="countdown" id="countdown"></span>
+                </div>
+                <div id="checkins" style="overflow-y:auto;flex:1"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2>App Time</h2>
+                <div id="apps"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="clock" id="clock"></div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function fmtDur(s) {
+            const m = Math.floor(s / 60), h = Math.floor(m / 60), mm = m % 60;
+            return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+        function fmtCountdown(s) {
+            const m = Math.floor(s / 60), sec = s % 60;
+            return `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+        }
+
+        function renderList(el, items) {
+            el.innerHTML = items.length
+                ? items.map(i => `<li class="${i.done ? "done" : ""}">${i.done ? "\u2713 " : "\u2022 "}${i.text}</li>`).join("")
+                : '<li class="empty">Nothing yet</li>';
+        }
+
+        async function refresh() {
+            let d;
+            try { d = await (await fetch("/api/board", { cache: "no-store" })).json(); }
+            catch (e) { $("net").textContent = "Offline"; return; }
+
+            $("weather").textContent = d.weather || "Weather unavailable";
+            $("focus").textContent = d.focus ? "Focus: " + d.focus : "";
+            $("net").textContent = "";
+
+            renderList($("todo"), d.todo);
+            renderList($("shopping"), d.shopping);
+
+            $("habits").innerHTML = d.habits.map(h =>
+                `<span class="habit ${h.done ? "done" : ""}"><span class="box"></span>${h.name}</span>`
+            ).join("");
+
+            // Countdown
+            const cd = $("countdown");
+            if (!d.is_awake) cd.textContent = "Sleeping";
+            else if (d.next_in == null) cd.textContent = "";
+            else cd.textContent = "next: " + fmtCountdown(Math.max(0, d.next_in));
+
+            // Check-ins (newest first)
+            $("checkins").innerHTML = d.checkins.length
+                ? d.checkins.slice().reverse().map(e => {
+                    const t = new Date(e.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                    return `<div class="checkin"><span class="t">${t}</span>${e.text}</div>`;
+                }).join("")
+                : '<div class="empty">No check-ins yet</div>';
+
+            // App time
+            $("apps").innerHTML = d.apps.length
+                ? d.apps.map(a =>
+                    `<div class="app-row ${a.over_limit ? "over" : ""}"><span>${a.app}</span>` +
+                    `<span><span class="app-time">${fmtDur(a.seconds)}</span>` +
+                    `<span class="app-opens">${a.opens}\u00d7</span></span></div>`
+                ).join("")
+                : '<div class="empty">None today</div>';
+        }
+
+        function tickClock() {
+            $("clock").textContent = new Date().toLocaleString(undefined,
+                { weekday: "long", month: "long", day: "numeric",
+                  hour: "2-digit", minute: "2-digit" });
+        }
+
+        setInterval(refresh, 5000);
+        setInterval(tickClock, 1000);
+        refresh(); tickClock();
+    </script>
+</body>
+</html>

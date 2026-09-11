@@ -1,12 +1,19 @@
 import os
+import json
 import sqlite3
-from datetime import date, timedelta
+import time
+import urllib.request
+from datetime import date, datetime, timedelta
+from threading import Lock, Thread
 from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__, static_folder="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lists.db")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
+TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
+APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 
 # Live-reload: enabled when LIVE_RELOAD=1 in the environment.
 LIVE_RELOAD = os.environ.get("LIVE_RELOAD") == "1"
@@ -330,6 +337,119 @@ def version():
     return jsonify({"version": static_version(), "live_reload": LIVE_RELOAD})
 
 
+# --- Board view (landscape web version of the physical display) ---
+
+WEATHER_LAT = os.environ.get("WEATHER_LAT", "44.9778")
+WEATHER_LON = os.environ.get("WEATHER_LON", "-93.2650")
+WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")
+COUNT_ONLY = {"TikTok", "YouTube"}
+APP_LIMIT_SEC = int(os.environ.get("APP_TIME_LIMIT_MIN", "60")) * 60
+_wx = {"data": None}
+_wx_lock = Lock()
+
+WEATHER_CODES = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
+    61: "Rain", 63: "Rain", 65: "Heavy rain", 71: "Snow", 73: "Snow",
+    75: "Heavy snow", 80: "Showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Snow showers", 95: "Thunderstorm",
+    96: "Thunderstorm", 99: "Thunderstorm",
+}
+
+
+def _board_weather_thread():
+    unit = "fahrenheit" if WEATHER_UNITS.startswith("f") else "celsius"
+    url = ("https://api.open-meteo.com/v1/forecast?"
+           f"latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
+           "&current=temperature_2m,weather_code"
+           "&daily=temperature_2m_max,temperature_2m_min,weather_code"
+           f"&temperature_unit={unit}&timezone=auto&forecast_days=1")
+    deg = "F" if unit == "fahrenheit" else "C"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                d = json.load(r)
+            cur, daily = d.get("current", {}), d.get("daily", {})
+            txt = (f"{round(cur.get('temperature_2m'))}\u00b0{deg}  "
+                   f"{WEATHER_CODES.get(cur.get('weather_code', 0), '')}   "
+                   f"H:{round(daily.get('temperature_2m_max',[0])[0])}\u00b0  "
+                   f"L:{round(daily.get('temperature_2m_min',[0])[0])}\u00b0")
+            with _wx_lock:
+                _wx["data"] = txt
+            time.sleep(15 * 60)
+        except Exception:
+            time.sleep(60)
+
+
+def _read_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _board_habits():
+    today = date.today().isoformat()
+    conn = get_db()
+    rows = conn.execute("SELECT id, name FROM habits ORDER BY position, id").fetchall()
+    out = []
+    for r in rows:
+        logs = {x["day"] for x in conn.execute(
+            "SELECT day FROM habit_log WHERE habit_id = ?", (r["id"],)).fetchall()}
+        out.append({"name": r["name"], "done": today in logs})
+    conn.close()
+    return out
+
+
+@app.route("/api/board")
+def api_board():
+    today = date.today().isoformat()
+    # Lists
+    conn = get_db()
+    todo = [dict(x) for x in conn.execute(
+        "SELECT text, done FROM items WHERE list_type='todo' ORDER BY done, created_at DESC")]
+    shopping = [dict(x) for x in conn.execute(
+        "SELECT text, done FROM items WHERE list_type='shopping' ORDER BY done, created_at DESC")]
+    frow = conn.execute("SELECT value, day FROM settings WHERE key='focus'").fetchone()
+    conn.close()
+    focus = frow["value"] if frow and frow["day"] == today else ""
+
+    # Tracker (today's check-ins + countdown)
+    log = _read_json(TRACKER_LOG, [])
+    todays = [e for e in log if str(e.get("timestamp", "")).startswith(today)]
+    state = _read_json(TRACKER_STATE, {})
+    nct = state.get("next_checkin_time")
+    next_in = max(0, int(nct - time.time())) if nct else None
+
+    # App usage today (time + opens, over-limit flag)
+    au = _read_json(APPUSE_FILE, {})
+    totals = au.get("totals", {}).get(today, {})
+    opens = au.get("opens", {}).get(today, {})
+    apps = sorted(
+        ({"app": a, "seconds": totals.get(a, 0), "opens": opens.get(a, 0),
+          "over_limit": bool(APP_LIMIT_SEC and totals.get(a, 0) >= APP_LIMIT_SEC)}
+         for a in (set(totals) | set(opens))),
+        key=lambda r: -r["seconds"])
+
+    with _wx_lock:
+        weather = _wx["data"]
+
+    return jsonify({
+        "todo": todo, "shopping": shopping, "focus": focus,
+        "habits": _board_habits(),
+        "checkins": todays[-6:],
+        "next_in": next_in, "is_awake": state.get("is_awake", True),
+        "apps": apps,
+        "weather": weather,
+    })
+
+
+@app.route("/board")
+def board():
+    return send_from_directory("static", "board.html")
+
+
 # --- Serve Frontend ---
 
 
@@ -339,4 +459,5 @@ def index():
 
 
 if __name__ == "__main__":
+    Thread(target=_board_weather_thread, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, debug=LIVE_RELOAD, use_reloader=LIVE_RELOAD)
