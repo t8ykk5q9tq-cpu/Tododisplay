@@ -74,6 +74,13 @@ DISTRACTION_APPS = set(getattr(cfg, "DISTRACTION_APPS",
 # Hour (0-23) to send the end-of-day summary push. -1 disables.
 DAILY_SUMMARY_HOUR = int(getattr(cfg, "DAILY_SUMMARY_HOUR", 21))
 
+# Check-in compliance: the hours you're expected to be logging check-ins.
+# Expected count = elapsed check-in intervals within these hours so far today.
+COMPLIANCE_START_HOUR = int(getattr(cfg, "COMPLIANCE_START_HOUR", 8))
+COMPLIANCE_END_HOUR = int(getattr(cfg, "COMPLIANCE_END_HOUR", 22))
+# You're "behind" if compliance drops below this fraction (0-1).
+COMPLIANCE_BEHIND_BELOW = float(getattr(cfg, "COMPLIANCE_BEHIND_BELOW", 0.7))
+
 
 def classify_app(name):
     """Return 'focus', 'distraction', or 'neutral' for an app/category name."""
@@ -588,6 +595,56 @@ def _fmt_dur(secs):
     return f"{h}h {mm}m" if h else f"{mm}m"
 
 
+COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
+
+
+def load_compliance_state():
+    if os.path.exists(COMPLIANCE_FILE):
+        try:
+            with open(COMPLIANCE_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"streak": 0, "last_eval_day": None}
+
+
+def save_compliance_state(s):
+    with open(COMPLIANCE_FILE, "w") as f:
+        json.dump(s, f)
+
+
+def compliance_streak():
+    return load_compliance_state().get("streak", 0)
+
+
+def compliance_today():
+    """How well you've kept up with check-ins today, within waking hours.
+    expected = number of check-in intervals elapsed so far in the compliance
+    window; done = check-ins logged today; missed = expected - done."""
+    now = datetime.now()
+    today = now.date().isoformat()
+    interval_min = max(1, INTERVAL // 60)
+
+    # Minutes of the compliance window that have elapsed so far today.
+    start_min = COMPLIANCE_START_HOUR * 60
+    end_min = COMPLIANCE_END_HOUR * 60
+    now_min = now.hour * 60 + now.minute
+    elapsed_min = max(0, min(now_min, end_min) - start_min)
+    expected = elapsed_min // interval_min
+
+    done = len([e for e in load_log()
+                if str(e.get("timestamp", "")).startswith(today)])
+    missed = max(0, expected - done)
+    pct = int(round((done / expected) * 100)) if expected > 0 else 100
+    pct = min(pct, 100)
+    behind = expected > 0 and (done / expected) < COMPLIANCE_BEHIND_BELOW
+    before_window = now_min < start_min
+    return {"expected": expected, "done": done, "missed": missed,
+            "percent": pct, "behind": behind and not before_window,
+            "active": not before_window and now_min < end_min,
+            "streak": compliance_streak()}
+
+
 def build_daily_summary():
     """Compose the end-of-day summary text from all tracked data."""
     today = date.today().isoformat()
@@ -650,6 +707,49 @@ def daily_summary_push_thread():
         if now.hour == DAILY_SUMMARY_HOUR and last_sent != today:
             last_sent = today
             send_pushover(build_daily_summary(), title="Daily summary")
+        time.sleep(60)
+
+
+# Escalating nag messages as missed check-ins pile up.
+NAG_INTERVAL_MIN = 10  # only nag at most this often while you're behind
+
+
+def compliance_nag_thread():
+    """While you're behind on check-ins during waking hours, send escalating
+    nags. Also evaluate the daily compliance streak at end of day."""
+    last_nag = 0
+    while True:
+        now = datetime.now()
+        c = compliance_today()
+
+        # Escalating nags while behind and awake.
+        if c["behind"] and is_awake and (time.time() - last_nag) >= NAG_INTERVAL_MIN * 60:
+            missed = c["missed"]
+            if missed >= 5:
+                msg = f"Seriously behind: {missed} check-ins missed today ({c['percent']}%). Log something NOW."
+            elif missed >= 3:
+                msg = f"You're slipping - {missed} check-ins missed ({c['percent']}%). Don't break your streak."
+            else:
+                msg = f"Behind on check-ins ({c['done']}/{c['expected']}). Tap to log."
+            cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
+            send_pushover(msg, title="Check-in compliance", url=cin_url,
+                          url_title="Log a check-in")
+            last_nag = time.time()
+
+        # End-of-day streak evaluation (once, after the compliance window).
+        st = load_compliance_state()
+        today = now.date().isoformat()
+        if now.hour >= COMPLIANCE_END_HOUR and st.get("last_eval_day") != today:
+            met = c["expected"] == 0 or (c["done"] / c["expected"]) >= COMPLIANCE_BEHIND_BELOW
+            st["streak"] = st.get("streak", 0) + 1 if met else 0
+            st["last_eval_day"] = today
+            save_compliance_state(st)
+            if met:
+                send_pushover(f"Check-in goal met! Compliance streak: {st['streak']} days.",
+                              title="Compliance")
+            else:
+                send_pushover(f"Check-in goal missed ({c['percent']}%). Streak reset to 0.",
+                              title="Compliance")
         time.sleep(60)
 
 
@@ -744,6 +844,7 @@ def status():
         "app_limit_min": APP_TIME_LIMIT_MIN,
         "focus": focus_distraction_today(),
         "moods": moods_today(),
+        "compliance": compliance_today(),
     })
 
 
@@ -809,5 +910,6 @@ if __name__ == "__main__":
     Thread(target=midnight_email_thread, daemon=True).start()
     Thread(target=habit_reminder_thread, daemon=True).start()
     Thread(target=daily_summary_push_thread, daemon=True).start()
+    Thread(target=compliance_nag_thread, daemon=True).start()
     print("Time Tracker running on http://0.0.0.0:5050")
     app.run(host="0.0.0.0", port=5050, debug=False)

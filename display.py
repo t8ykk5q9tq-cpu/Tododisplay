@@ -24,6 +24,9 @@ TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
+COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
+COMPLIANCE_START_HOUR = int(os.environ.get("COMPLIANCE_START_HOUR", "8"))
+COMPLIANCE_END_HOUR = int(os.environ.get("COMPLIANCE_END_HOUR", "22"))
 # Minutes per check-in, used to estimate time-per-category in the summary.
 # Should match tracker.py's CHECKIN_INTERVAL_MIN.
 TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
@@ -500,11 +503,37 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
+    # Check-in compliance (how well you've kept up today).
+    compliance = None
+    try:
+        now = datetime.now()
+        start_min = COMPLIANCE_START_HOUR * 60
+        end_min = COMPLIANCE_END_HOUR * 60
+        now_min = now.hour * 60 + now.minute
+        interval_min = max(1, TRACKER_INTERVAL_MIN)
+        elapsed_min = max(0, min(now_min, end_min) - start_min)
+        expected = elapsed_min // interval_min
+        done = total_today  # today's check-in count
+        pct = min(100, int(round((done / expected) * 100))) if expected else 100
+        before = now_min < start_min
+        behind = (not before) and expected > 0 and (done / expected) < 0.7
+        streak = 0
+        try:
+            with open(COMPLIANCE_FILE) as f:
+                streak = json.load(f).get("streak", 0)
+        except (OSError, json.JSONDecodeError):
+            pass
+        compliance = {"expected": expected, "done": done,
+                      "missed": max(0, expected - done), "percent": pct,
+                      "behind": behind, "streak": streak}
+    except Exception:
+        pass
+
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
             "summary": summary, "app_opens": app_opens,
             "total_today": total_today,
             "focus_stats": focus_stats, "mac_week": mac_week,
-            "mood": mood}
+            "mood": mood, "compliance": compliance}
 
 
 def last_update_str():
@@ -801,6 +830,21 @@ def draw_tracker(screen, fonts, rect, tracker):
             f"Mood {mood['latest']}/5  (avg {mood['avg']:.1f})", True, DONE_COLOR)
         screen.blit(mood_surf, (x + pad + title_surf.get_width() + 16, y + pad + 6))
 
+    # Compliance line: check-ins done/expected, red + warning when behind.
+    comp = tracker.get("compliance")
+    if comp and comp["expected"] > 0:
+        if comp["behind"]:
+            ctext = (f"\u26a0 BEHIND: {comp['done']}/{comp['expected']} check-ins "
+                     f"({comp['percent']}%)  -  {comp['missed']} missed")
+            ccolor = WARN_COLOR
+        else:
+            ctext = (f"Check-ins {comp['done']}/{comp['expected']} ({comp['percent']}%)"
+                     f"   streak {comp['streak']}d")
+            ccolor = HEADER_COLOR if comp["percent"] >= 90 else TEXT_COLOR
+        c_surf = fonts["tiny"].render(ctext, True, ccolor)
+        # Draw just under the title line.
+        screen.blit(c_surf, (x + pad, y + pad + title_surf.get_height() + 4))
+
     next_in = tracker.get("next_in")
     awake = tracker.get("is_awake", True)
     if not awake:
@@ -818,7 +862,10 @@ def draw_tracker(screen, fonts, rect, tracker):
         screen.blit(cd_surf, (x + w - pad - cd_surf.get_width(), y + pad))
 
     # Two columns below the header: recent check-ins (left) + today summary (right).
-    content_y = y + pad + title_surf.get_height() + 12
+    # Leave extra room if the compliance line was drawn under the title.
+    comp = tracker.get("compliance")
+    comp_offset = (fonts["tiny"].get_height() + 6) if (comp and comp["expected"] > 0) else 0
+    content_y = y + pad + title_surf.get_height() + 12 + comp_offset
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
     summary = tracker.get("summary") or []

@@ -49,6 +49,11 @@ DISTRACTION_APPS = ["TikTok", "YouTube"]
 # Hour (0-23) to send a Pushover recap of the day. Set to -1 to disable.
 DAILY_SUMMARY_HOUR = 21
 
+# --- Check-in compliance (nags you when you skip check-ins) ---
+COMPLIANCE_START_HOUR = 8      # start expecting check-ins at this hour
+COMPLIANCE_END_HOUR = 22       # stop expecting after this hour
+COMPLIANCE_BEHIND_BELOW = 0.7  # "behind" when you've done < 70% of expected
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"

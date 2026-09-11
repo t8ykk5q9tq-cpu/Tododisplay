@@ -104,6 +104,9 @@
         <div class="label" id="cd-label">until next check-in</div>
     </div>
 
+    <!-- Check-in compliance -->
+    <div class="card" id="compliance-card"></div>
+
     <!-- Quick-pick buttons: one tap logs that category -->
     <div class="card">
         <div class="quick-title">Quick check-in</div>
@@ -208,6 +211,25 @@
             const m = Math.floor(secs / 60);
             const h = Math.floor(m / 60), mm = m % 60;
             return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+
+        function renderCompliance(c) {
+            const el = document.getElementById("compliance-card");
+            if (!c || c.expected === 0) {
+                el.innerHTML = '<div class="recent-title">Compliance</div>' +
+                    `<div class="sum-total">Streak: ${c ? c.streak : 0} days</div>`;
+                el.style.borderLeft = "";
+                return;
+            }
+            const behind = c.behind;
+            el.style.borderLeft = behind ? "5px solid #e94560" : "5px solid #00d4ff";
+            const color = behind ? "#e94560" : (c.percent >= 90 ? "#00d4ff" : "#eaeaea");
+            el.innerHTML =
+                '<div class="recent-title">Check-in Compliance</div>' +
+                `<div style="font-size:1.6rem;font-weight:700;color:${color}">` +
+                `${c.done}/${c.expected}  (${c.percent}%)</div>` +
+                (behind ? `<div style="color:#e94560">\u26a0 ${c.missed} missed - catch up!</div>` : "") +
+                `<div class="sum-total">Compliance streak: ${c.streak} days</div>`;
         }
 
         const MOOD_EMOJI = { 1: "\uD83D\uDE1E", 2: "\uD83D\uDE15", 3: "\uD83D\uDE10", 4: "\uD83D\uDE42", 5: "\uD83D\uDE04" };
@@ -336,6 +358,7 @@
             buildQuickButtons(s.categories);
             renderRecent(s.recent);
             renderSummary(s.summary, s.total_checkins);
+            renderCompliance(s.compliance);
             buildMoodButtons();
             renderMoodToday(s.moods);
             renderFocus(s.focus);
