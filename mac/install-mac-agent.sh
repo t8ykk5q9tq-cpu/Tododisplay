@@ -13,8 +13,14 @@ PLIST_DEST="$AGENT_DIR/$LABEL.plist"
 
 # Resolve the repo dir (parent of this mac/ folder) and the watcher script.
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT="$REPO_DIR/mac_usage.sh"
+SRC_SCRIPT="$REPO_DIR/mac_usage.sh"
 PLIST_SRC="$REPO_DIR/mac/$LABEL.plist"
+
+# macOS blocks launchd agents from running scripts inside ~/Documents, ~/Desktop,
+# ~/Downloads (privacy protection -> "Operation not permitted"). So we copy the
+# watcher to a neutral location that launchd can access.
+RUN_DIR="$HOME/.tododisplay"
+SCRIPT="$RUN_DIR/mac_usage.sh"
 
 if [ "$1" = "--uninstall" ]; then
     launchctl unload "$PLIST_DEST" 2>/dev/null || true
@@ -23,14 +29,18 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
-if [ ! -f "$SCRIPT" ]; then
-    echo "ERROR: cannot find $SCRIPT"
+if [ ! -f "$SRC_SCRIPT" ]; then
+    echo "ERROR: cannot find $SRC_SCRIPT"
     exit 1
 fi
 
-mkdir -p "$AGENT_DIR"
+mkdir -p "$AGENT_DIR" "$RUN_DIR"
 
-# Fill the __SCRIPT__ placeholder with the real path and install the plist.
+# Copy the watcher out of the protected Documents folder so launchd can run it.
+cp "$SRC_SCRIPT" "$SCRIPT"
+chmod +x "$SCRIPT"
+
+# Fill the __SCRIPT__ placeholder with the runnable path and install the plist.
 sed "s|__SCRIPT__|$SCRIPT|g" "$PLIST_SRC" > "$PLIST_DEST"
 
 # Reload (unload first in case it's already installed).
