@@ -23,6 +23,7 @@ DB_PATH = os.path.join(BASE_DIR, "lists.db")
 TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
+MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
 # Minutes per check-in, used to estimate time-per-category in the summary.
 # Should match tracker.py's CHECKIN_INTERVAL_MIN.
 TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
@@ -485,10 +486,25 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
+    # Today's mood: latest value + average.
+    mood = None
+    try:
+        with open(MOOD_FILE) as f:
+            all_moods = json.load(f)
+        today = datetime.now().date().isoformat()
+        todays = [m for m in all_moods
+                  if str(m.get("timestamp", "")).startswith(today)]
+        if todays:
+            avg = sum(m["value"] for m in todays) / len(todays)
+            mood = {"latest": todays[-1]["value"], "avg": avg, "count": len(todays)}
+    except (OSError, json.JSONDecodeError):
+        pass
+
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
             "summary": summary, "app_opens": app_opens,
             "total_today": total_today,
-            "focus_stats": focus_stats, "mac_week": mac_week}
+            "focus_stats": focus_stats, "mac_week": mac_week,
+            "mood": mood}
 
 
 def last_update_str():
@@ -774,9 +790,16 @@ def draw_tracker(screen, fonts, rect, tracker):
     item_font = fonts["item"]
     small_font = fonts["clock"]
 
-    # Header row: "Time Tracker" + countdown on the right.
+    # Header row: "Time Tracker" + mood (if logged) + countdown on the right.
     title_surf = fonts["clock"].render("Time Tracker", True, HEADER_COLOR)
     screen.blit(title_surf, (x + pad, y + pad))
+
+    mood = tracker.get("mood")
+    if mood:
+        # Bundled font has no emoji, so show a worded mood: "Mood 4/5".
+        mood_surf = fonts["tiny"].render(
+            f"Mood {mood['latest']}/5  (avg {mood['avg']:.1f})", True, DONE_COLOR)
+        screen.blit(mood_surf, (x + pad + title_surf.get_width() + 16, y + pad + 6))
 
     next_in = tracker.get("next_in")
     awake = tracker.get("is_awake", True)

@@ -45,6 +45,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tracker_log.json")
 STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")  # per-app session times
+MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")     # mood check-ins (1-5)
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
@@ -532,6 +533,42 @@ def active_batch():
     return "ok"
 
 
+def load_moods():
+    if os.path.exists(MOOD_FILE):
+        try:
+            with open(MOOD_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def moods_today():
+    today = date.today().isoformat()
+    return [m for m in load_moods()
+            if str(m.get("timestamp", "")).startswith(today)]
+
+
+@app.route("/mood", methods=["GET", "POST"])
+def log_mood():
+    """Log a mood 1-5. GET /mood?value=4 (so a bookmark/Shortcut works) or POST."""
+    if request.method == "POST":
+        value = (request.get_json(silent=True) or {}).get("value")
+    else:
+        value = request.args.get("value")
+    try:
+        value = int(value)
+    except (ValueError, TypeError):
+        return jsonify({"error": "value 1-5 required"}), 400
+    if not 1 <= value <= 5:
+        return jsonify({"error": "value must be 1-5"}), 400
+    moods = load_moods()
+    moods.append({"timestamp": datetime.now().isoformat(), "value": value})
+    with open(MOOD_FILE, "w") as f:
+        json.dump(moods, f)
+    return jsonify({"status": "ok", "value": value})
+
+
 def focus_distraction_today():
     """Return {'focus_sec', 'distraction_sec', 'longest_focus_sec'} for today."""
     data = load_appuse()
@@ -592,6 +629,12 @@ def build_daily_summary():
     todays = [e for e in load_log() if str(e.get("timestamp", "")).startswith(today)]
     if todays:
         parts.append(f"{len(todays)} check-ins")
+
+    # Average mood
+    mt = moods_today()
+    if mt:
+        avg = sum(m["value"] for m in mt) / len(mt)
+        parts.append(f"Mood {avg:.1f}/5")
 
     return "  |  ".join(parts) if parts else "No activity tracked today."
 
@@ -700,6 +743,7 @@ def status():
         "app_week": app_usage_week(),
         "app_limit_min": APP_TIME_LIMIT_MIN,
         "focus": focus_distraction_today(),
+        "moods": moods_today(),
     })
 
 

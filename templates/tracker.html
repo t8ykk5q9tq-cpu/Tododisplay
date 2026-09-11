@@ -70,6 +70,13 @@
         .sum-cat { color: #eaeaea; }
         .sum-time { color: #00d4ff; }
         .sum-total { color: #8a8a9a; font-size: 0.85rem; margin-top: 0.5rem; }
+        /* Mood buttons */
+        .mood-row { display: flex; gap: 0.5rem; justify-content: space-between; }
+        .mood-btn {
+            flex: 1; padding: 0.7rem 0; border: 2px solid #0f3460; border-radius: 0.6rem;
+            background: #0f3460; font-size: 1.5rem; cursor: pointer;
+        }
+        .mood-btn:active { background: #00d4ff; }
         /* App usage rows */
         .app-row { display: flex; justify-content: space-between; align-items: baseline;
             padding: 0.4rem 0; border-bottom: 1px solid #0f3460; }
@@ -109,6 +116,13 @@
             <input type="text" id="entry" placeholder="Something else..." autocomplete="off">
             <button type="submit">Log</button>
         </form>
+    </div>
+
+    <!-- Mood check-in -->
+    <div class="card">
+        <div class="recent-title">Mood</div>
+        <div class="mood-row" id="mood-row"></div>
+        <div class="sum-total" id="mood-today"></div>
     </div>
 
     <!-- Today's summary (time per category) -->
@@ -194,6 +208,37 @@
             const m = Math.floor(secs / 60);
             const h = Math.floor(m / 60), mm = m % 60;
             return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+
+        const MOOD_EMOJI = { 1: "\uD83D\uDE1E", 2: "\uD83D\uDE15", 3: "\uD83D\uDE10", 4: "\uD83D\uDE42", 5: "\uD83D\uDE04" };
+        let moodBuilt = false;
+        function buildMoodButtons() {
+            if (moodBuilt) return;
+            const row = document.getElementById("mood-row");
+            row.innerHTML = "";
+            for (let v = 1; v <= 5; v++) {
+                const b = document.createElement("button");
+                b.className = "mood-btn";
+                b.textContent = MOOD_EMOJI[v];
+                b.addEventListener("click", async () => {
+                    await fetch("/mood", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ value: v })
+                    });
+                    refresh();
+                });
+                row.appendChild(b);
+            }
+            moodBuilt = true;
+        }
+
+        function renderMoodToday(moods) {
+            const el = document.getElementById("mood-today");
+            if (!moods || moods.length === 0) { el.textContent = "No mood logged yet"; return; }
+            const avg = moods.reduce((a, m) => a + m.value, 0) / moods.length;
+            const last = moods[moods.length - 1].value;
+            el.textContent = `Latest ${MOOD_EMOJI[last]}  •  Avg ${avg.toFixed(1)}/5  (${moods.length} today)`;
         }
 
         function renderFocus(fs) {
@@ -291,6 +336,8 @@
             buildQuickButtons(s.categories);
             renderRecent(s.recent);
             renderSummary(s.summary, s.total_checkins);
+            buildMoodButtons();
+            renderMoodToday(s.moods);
             renderFocus(s.focus);
             renderAppToday(s.app_usage);
             renderAppWeek(s.app_week);
