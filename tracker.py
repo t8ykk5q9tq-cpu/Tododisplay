@@ -101,9 +101,54 @@ app = Flask(__name__)
 
 # ---------- helpers ----------
 
+# Pushover free tier = 10,000 messages/month. Cap per day at an even share of
+# that (10000 / days-in-this-month) so a runaway nag loop can't blow the month.
+PUSHOVER_MONTHLY_LIMIT = 10000
+PUSHOVER_COUNT_FILE = os.path.join(BASE_DIR, "pushover_count.json")
+
+
+def _daily_pushover_budget():
+    import calendar
+    now = datetime.now()
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    return PUSHOVER_MONTHLY_LIMIT // days_in_month
+
+
+def _load_pushover_count():
+    try:
+        with open(PUSHOVER_COUNT_FILE) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _pushover_budget_ok():
+    today = date.today().isoformat()
+    count = _load_pushover_count().get(today, 0)
+    return count < _daily_pushover_budget()
+
+
+def _pushover_budget_increment():
+    today = date.today().isoformat()
+    data = _load_pushover_count()
+    # Keep only today's key so the file doesn't grow.
+    data = {today: data.get(today, 0) + 1}
+    try:
+        with open(PUSHOVER_COUNT_FILE, "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
 def send_pushover(message, title="Time Tracker", url=None, url_title=None):
     if not cfg.PUSHOVER_USER or not cfg.PUSHOVER_TOKEN:
         return  # notifications disabled
+    # Stay within Pushover's free 10,000/month by capping each day at
+    # 10000 / days_in_current_month. Prevents runaway nag loops from blowing
+    # the whole monthly allowance in one day.
+    if not _pushover_budget_ok():
+        print("Pushover daily budget reached - skipping notification.")
+        return
     payload = {
         "token": cfg.PUSHOVER_TOKEN, "user": cfg.PUSHOVER_USER,
         "title": title, "message": message, "sound": "vibrate",
@@ -118,6 +163,7 @@ def send_pushover(message, title="Time Tracker", url=None, url_title=None):
             urllib.request.Request("https://api.pushover.net/1/messages.json", data=data),
             timeout=10,
         )
+        _pushover_budget_increment()
     except Exception as e:
         print(f"Pushover error: {e}")
 
