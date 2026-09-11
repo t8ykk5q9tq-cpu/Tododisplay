@@ -288,20 +288,44 @@ def add_entry():
     return jsonify({"status": "ok"})
 
 
+# Skip a duplicate quick-log of the same text within this many seconds
+# (guards against iOS automations firing the request twice on app open).
+QUICKLOG_DEBOUNCE_SEC = 60
+
+
+def _recently_logged(text):
+    """True if an identical check-in text was logged within the debounce window."""
+    entries = load_log()
+    if not entries:
+        return False
+    last = entries[-1]
+    if last.get("text") != text:
+        return False
+    try:
+        ts = datetime.fromisoformat(last["timestamp"])
+        return (datetime.now() - ts).total_seconds() < QUICKLOG_DEBOUNCE_SEC
+    except (ValueError, KeyError):
+        return False
+
+
 @app.route("/quicklog")
 def quick_log():
     """GET endpoint so Pushover notification links / quick bookmarks can log a
-    check-in in one tap: /quicklog?category=Work  (text defaults to category)."""
+    check-in in one tap: /quicklog?category=Work  (text defaults to category).
+    De-duplicates rapid repeats so a double-firing automation logs only once."""
     category = (request.args.get("category") or "").strip() or None
     text = (request.args.get("text") or "").strip() or category
     if not text:
         return "Nothing logged (no text/category).", 400
-    log_entry(text, category=category)
-    notification_pending.clear()
+    duplicate = _recently_logged(text)
+    if not duplicate:
+        log_entry(text, category=category)
+        notification_pending.clear()
+    status = "Already logged" if duplicate else "Logged"
     # Return a tiny friendly page since this opens in a browser.
     return (f"<html><body style='font-family:sans-serif;background:#1a1a2e;"
             f"color:#eaeaea;text-align:center;padding-top:3rem'>"
-            f"<h2 style='color:#00d4ff'>Logged: {text}</h2>"
+            f"<h2 style='color:#00d4ff'>{status}: {text}</h2>"
             f"<p>You can close this.</p></body></html>")
 
 
