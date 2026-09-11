@@ -28,6 +28,8 @@ APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
 # Categories shown as a count (e.g. "TikTok x9") instead of estimated time.
 COUNT_ONLY_CATEGORIES = {"TikTok", "YouTube"}
+# Per-app daily time limit (minutes); over-limit apps display in red.
+APP_TIME_LIMIT_SEC = int(os.environ.get("APP_TIME_LIMIT_MIN", "60")) * 60
 
 # --- Weather (Open-Meteo: free, no API key needed) ---
 # Set your location via env vars; defaults below can be edited.
@@ -424,7 +426,10 @@ def read_tracker():
         names = set(totals) | set(opens)
         app_opens = sorted(
             ({"category": a, "seconds": totals.get(a, 0),
-              "opens": opens.get(a, 0)} for a in names),
+              "opens": opens.get(a, 0),
+              "over_limit": bool(APP_TIME_LIMIT_SEC and
+                                 totals.get(a, 0) >= APP_TIME_LIMIT_SEC)}
+             for a in names),
             key=lambda r: -r["seconds"],
         )
     except (OSError, json.JSONDecodeError):
@@ -668,10 +673,13 @@ def draw_app_opens(screen, fonts, rect, app_opens):
         hh, mm = divmod(mins, 60)
         tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
         opens = a.get("opens", 0)
-        # e.g. "47m  9x" (time in cyan, opens in muted grey)
-        val_surf = fonts["item"].render(tstr, True, HEADER_COLOR)
+        over = a.get("over_limit")
+        # Over the daily limit -> name + time in red; otherwise cyan time.
+        name_color = WARN_COLOR if over else TEXT_COLOR
+        time_color = WARN_COLOR if over else HEADER_COLOR
+        val_surf = fonts["item"].render(tstr, True, time_color)
         opens_surf = fonts["tiny"].render(f"{opens}\u00d7", True, DONE_COLOR)
-        name_surf = fonts["item"].render(a["category"], True, TEXT_COLOR)
+        name_surf = fonts["item"].render(a["category"], True, name_color)
         screen.blit(name_surf, (x + pad, line_y))
         # Right-align: opens count, then time to its left.
         ox = x + w - pad - opens_surf.get_width()

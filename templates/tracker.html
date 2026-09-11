@@ -196,11 +196,14 @@
                 el.innerHTML = '<div class="app-row"><span class="app-name">None today</span></div>';
                 return;
             }
-            el.innerHTML = usage.map(a =>
-                `<div class="app-row"><span class="app-name">${a.app}</span>` +
-                `<span><span class="app-val">${fmtDur(a.seconds)}</span>` +
-                `<span class="app-opens">${a.opens}\u00d7</span></span></div>`
-            ).join("");
+            el.innerHTML = usage.map(a => {
+                const over = a.over_limit ? ' style="color:#e94560"' : '';
+                const valCls = a.over_limit ? 'style="color:#e94560"' : 'class="app-val"';
+                return `<div class="app-row"><span class="app-name"${over}>${a.app}` +
+                    `${a.over_limit ? ' \u26a0' : ''}</span>` +
+                    `<span><span ${valCls}>${fmtDur(a.seconds)}</span>` +
+                    `<span class="app-opens">${a.opens}\u00d7</span></span></div>`;
+            }).join("");
         }
 
         function renderAppWeek(week) {

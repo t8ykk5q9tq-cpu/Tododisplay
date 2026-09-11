@@ -35,6 +35,10 @@ CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health", "Personal",
 # (good for app-opens, which don't imply a full interval of activity).
 COUNT_ONLY_CATEGORIES = ["TikTok", "YouTube"]
 
+# Daily per-app screen-time limit in minutes. When an app's total for the day
+# crosses this, you get one Pushover alert. Set to 0 to disable.
+APP_TIME_LIMIT_MIN = 60
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"

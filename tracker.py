@@ -59,6 +59,9 @@ CATEGORIES = list(getattr(cfg, "CATEGORIES",
 # since app-opens don't imply a full interval of activity.
 COUNT_ONLY_CATEGORIES = set(getattr(cfg, "COUNT_ONLY_CATEGORIES",
                                     ["TikTok", "YouTube"]))
+# Daily per-app screen-time limit (minutes). Crossing it fires one Pushover
+# alert per app per day. Set to 0 to disable.
+APP_TIME_LIMIT_MIN = int(getattr(cfg, "APP_TIME_LIMIT_MIN", 60))
 # The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
 # to the check-in page. Defaults to the Pi 5's Tailscale address; override in
 # tracker_config.py with PI_BASE_URL if it changes.
@@ -400,14 +403,29 @@ def app_stop():
         save_appuse(data)
         return _tiny_page(f"{app_name}: no open session")
     elapsed = int(time.time() - start)
+    crossed_limit = False
+    total_today = 0
     if 0 < elapsed <= MAX_SESSION_SEC:
         today = date.today().isoformat()
         data.setdefault("totals", {}).setdefault(today, {})
         data["totals"][today][app_name] = \
             data["totals"][today].get(app_name, 0) + elapsed
+        total_today = data["totals"][today][app_name]
+        # Fire a limit alert once per app per day when crossing the threshold.
+        if APP_TIME_LIMIT_MIN > 0 and total_today >= APP_TIME_LIMIT_MIN * 60:
+            alerted = data.setdefault("alerted", {}).setdefault(today, [])
+            if app_name not in alerted:
+                alerted.append(app_name)
+                mins = total_today // 60
+                send_pushover(
+                    f"You've used {app_name} for {mins} min today "
+                    f"(limit {APP_TIME_LIMIT_MIN} min).",
+                    title="Screen-time limit reached")
+                crossed_limit = True
     save_appuse(data)
     mins = max(1, elapsed // 60)
-    return _tiny_page(f"{app_name}: +{mins}m")
+    suffix = "  (limit reached!)" if crossed_limit else ""
+    return _tiny_page(f"{app_name}: +{mins}m{suffix}")
 
 
 def app_usage_today():
@@ -418,8 +436,10 @@ def app_usage_today():
     opens = data.get("opens", {}).get(today, {})
     # Include apps that have either time or opens recorded today.
     names = set(totals) | set(opens)
+    limit_sec = APP_TIME_LIMIT_MIN * 60
     return sorted(
-        ({"app": a, "seconds": totals.get(a, 0), "opens": opens.get(a, 0)}
+        ({"app": a, "seconds": totals.get(a, 0), "opens": opens.get(a, 0),
+          "over_limit": bool(limit_sec and totals.get(a, 0) >= limit_sec)}
          for a in names),
         key=lambda r: -r["seconds"],
     )
@@ -496,6 +516,7 @@ def status():
         "total_checkins": len(todays),
         "app_usage": app_usage_today(),
         "app_week": app_usage_week(),
+        "app_limit_min": APP_TIME_LIMIT_MIN,
     })
 
 
