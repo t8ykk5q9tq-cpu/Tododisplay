@@ -424,7 +424,7 @@ def read_tracker():
         totals = au.get("totals", {}).get(today, {})
         opens = au.get("opens", {}).get(today, {})
         names = set(totals) | set(opens)
-        app_opens = sorted(
+        rows = sorted(
             ({"category": a, "seconds": totals.get(a, 0),
               "opens": opens.get(a, 0),
               "over_limit": bool(APP_TIME_LIMIT_SEC and
@@ -432,6 +432,10 @@ def read_tracker():
              for a in names),
             key=lambda r: -r["seconds"],
         )
+        # Phone apps shown fully; Mac apps (prefixed "Mac:") capped to top 3.
+        phone_rows = [r for r in rows if not r["category"].startswith("Mac:")]
+        mac_rows = [r for r in rows if r["category"].startswith("Mac:")][:3]
+        app_opens = phone_rows + mac_rows
     except (OSError, json.JSONDecodeError):
         pass
 
