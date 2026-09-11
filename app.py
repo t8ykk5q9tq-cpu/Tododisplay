@@ -75,6 +75,16 @@ def init_db():
         )
         """
     )
+    # Simple key/value settings (used for the daily "focus for today" banner).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            day TEXT
+        )
+        """
+    )
     # Seed default habits if the table is empty. Also migrate an existing
     # install that still has ONLY the old untouched placeholder set, so the
     # new default list takes effect without wiping any habits you've added.
@@ -277,6 +287,38 @@ def delete_habit(habit_id):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+# --- Focus for today ---
+
+
+@app.route("/api/focus", methods=["GET"])
+def get_focus():
+    """Return today's focus, or empty if none set today (resets at midnight)."""
+    today = date.today().isoformat()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT value, day FROM settings WHERE key = 'focus'"
+    ).fetchone()
+    conn.close()
+    if row and row["day"] == today:
+        return jsonify({"focus": row["value"]})
+    return jsonify({"focus": ""})
+
+
+@app.route("/api/focus", methods=["POST"])
+def set_focus():
+    today = date.today().isoformat()
+    text = (request.get_json() or {}).get("focus", "").strip()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO settings (key, value, day) VALUES ('focus', ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, day = excluded.day",
+        (text, today),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"focus": text})
 
 
 # --- Live Reload ---

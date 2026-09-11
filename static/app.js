@@ -155,7 +155,33 @@ async function refreshAll() {
     renderList(shoppingItems, shoppingList);
     const habits = await fetchHabits();
     renderHabits(habits);
+    await refreshFocus();
 }
+
+// --- Focus for today ---
+async function refreshFocus() {
+    try {
+        const res = await fetch("/api/focus");
+        const data = await res.json();
+        const input = document.getElementById("focus-input");
+        // Only fill if the user isn't actively typing in it.
+        if (document.activeElement !== input) {
+            input.value = data.focus || "";
+        }
+    } catch (e) { /* ignore */ }
+}
+
+document.getElementById("focus-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("focus-input");
+    await fetch("/api/focus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ focus: input.value.trim() }),
+    });
+    input.blur();
+    await refreshFocus();
+});
 
 // --- Add Habit Form ---
 document.getElementById("add-habit-form").addEventListener("submit", async (e) => {

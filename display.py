@@ -28,7 +28,7 @@ TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 WEATHER_LAT = os.environ.get("WEATHER_LAT", "44.9778")   # default: Minneapolis, MN
 WEATHER_LON = os.environ.get("WEATHER_LON", "-93.2650")
 WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")  # or "celsius"
-_weather = {"text": None, "precip": None, "sun": None}  # updated by bg thread
+_weather = {"text": None, "precip": None, "sun": None, "tomorrow": None}  # bg thread
 _weather_lock = threading.Lock()
 
 # Open-Meteo weather codes -> short description.
@@ -60,7 +60,7 @@ def weather_thread():
         "&current=temperature_2m,weather_code"
         "&daily=temperature_2m_max,temperature_2m_min,weather_code,"
         "precipitation_probability_max,sunrise,sunset"
-        f"&temperature_unit={unit}&timezone=auto&forecast_days=1"
+        f"&temperature_unit={unit}&timezone=auto&forecast_days=2"
     )
     deg = "F" if unit == "fahrenheit" else "C"
     while True:
@@ -96,6 +96,17 @@ def weather_thread():
             except (ValueError, TypeError):
                 pass
 
+            # Tomorrow's forecast (index 1 of the daily arrays).
+            tomorrow = None
+            try:
+                t_hi = round(daily.get("temperature_2m_max", [None, None])[1])
+                t_lo = round(daily.get("temperature_2m_min", [None, None])[1])
+                t_code = daily.get("weather_code", [None, None])[1]
+                t_desc = WEATHER_CODES.get(t_code, "")
+                tomorrow = f"Tomorrow: {t_desc}  H:{t_hi}\u00b0  L:{t_lo}\u00b0"
+            except (IndexError, TypeError):
+                pass
+
             # Test override: set WEATHER_TEST_PRECIP to force the alert text,
             # e.g.  WEATHER_TEST_PRECIP="Snow likely today (80%)"
             test_precip = os.environ.get("WEATHER_TEST_PRECIP")
@@ -106,6 +117,7 @@ def weather_thread():
                 _weather["text"] = text
                 _weather["precip"] = precip
                 _weather["sun"] = sun
+                _weather["tomorrow"] = tomorrow
             # Success: next refresh in 15 minutes.
             time.sleep(15 * 60)
             continue
@@ -121,9 +133,10 @@ def weather_thread():
 
 
 def get_weather():
-    """Return (text, precip_alert_or_None, sun_line_or_None)."""
+    """Return (text, precip_alert_or_None, sun_line_or_None, tomorrow_or_None)."""
     with _weather_lock:
-        return _weather["text"], _weather["precip"], _weather["sun"]
+        return (_weather["text"], _weather["precip"],
+                _weather["sun"], _weather["tomorrow"])
 
 
 # --- Under-voltage monitoring (Raspberry Pi power health) ---
@@ -159,6 +172,36 @@ def power_thread():
 def get_power_warning():
     with _power_lock:
         return _power["warn"]
+
+
+# --- Connectivity indicator ---
+_net = {"online": False}
+_net_lock = threading.Lock()
+
+
+def net_thread():
+    """Ping a reliable host every 20s to know if the Pi is online, so the
+    display can show a Wi-Fi connected/disconnected indicator."""
+    import subprocess
+    while True:
+        online = False
+        for host in ("1.1.1.1", "8.8.8.8"):
+            try:
+                r = subprocess.run(["ping", "-c", "1", "-W", "2", host],
+                                   capture_output=True, timeout=4)
+                if r.returncode == 0:
+                    online = True
+                    break
+            except Exception:
+                pass
+        with _net_lock:
+            _net["online"] = online
+        time.sleep(20)
+
+
+def is_online():
+    with _net_lock:
+        return _net["online"]
 
 # --- Appearance ---
 BG_COLOR = (26, 26, 46)        # dark navy
@@ -286,6 +329,25 @@ def read_habits():
         return result
     except sqlite3.Error:
         return []
+
+
+def read_focus():
+    """Return today's 'focus for today' text, or '' if none set today."""
+    if not os.path.exists(DB_PATH):
+        return ""
+    today = datetime.now().date().isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT value, day FROM settings WHERE key = 'focus'"
+        ).fetchone()
+        conn.close()
+        if row and row["day"] == today and row["value"]:
+            return row["value"]
+    except sqlite3.Error:
+        pass
+    return ""
 
 
 def read_tracker():
@@ -429,6 +491,28 @@ GH_GREENS = [
     (150, 240, 255),
     (210, 250, 255),  # near-white cyan (hottest)
 ]
+
+
+def draw_wifi_icon(screen, cx, cy, size, online):
+    """Draw a small Wi-Fi glyph centered horizontally at cx, with its base dot
+    at cy. Cyan when online; grey with a slash when offline."""
+    import math
+    color = HEADER_COLOR if online else DONE_COLOR
+    # Base dot
+    dot_r = max(2, size // 8)
+    pygame.draw.circle(screen, color, (cx, cy), dot_r)
+    # Three concentric arcs above the dot (widening signal waves).
+    for i in range(1, 4):
+        r = int(size * i / 3)
+        rect = pygame.Rect(cx - r, cy - r, 2 * r, 2 * r)
+        # Arc from ~225deg to ~315deg (top arc), in radians.
+        pygame.draw.arc(screen, color, rect,
+                        math.radians(55), math.radians(125),
+                        max(2, size // 10))
+    # Slash through it when offline.
+    if not online:
+        pygame.draw.line(screen, WARN_COLOR,
+                         (cx - size, cy - size), (cx + size, cy + dot_r), 3)
 
 
 def draw_habits(screen, fonts, rect, habits):
@@ -582,9 +666,10 @@ def main():
     pygame.init()
     pygame.mouse.set_visible(False)
 
-    # Start background monitors (non-blocking): weather + Pi power health.
+    # Start background monitors (non-blocking): weather, power, connectivity.
     threading.Thread(target=weather_thread, daemon=True).start()
     threading.Thread(target=power_thread, daemon=True).start()
+    threading.Thread(target=net_thread, daemon=True).start()
 
     # Fullscreen at the display's native resolution
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
@@ -630,6 +715,7 @@ def main():
     shopping_items = []
     tracker_data = None
     habits_data = []
+    focus_text = ""
     update_str = last_update_str()
 
     running = True
@@ -649,6 +735,7 @@ def main():
             shopping_items = read_items("shopping")
             tracker_data = read_tracker()
             habits_data = read_habits()
+            focus_text = read_focus()
             update_str = last_update_str()
             last_tick = now
             last_refresh = now
@@ -673,11 +760,13 @@ def main():
 
         # Weather bar across the top. Main line always shows; a sun line and
         # (when expected) a highlighted precip alert line appear below it.
-        weather_text, precip_alert, sun_line = get_weather()
+        weather_text, precip_alert, sun_line, tomorrow_line = get_weather()
         line_h = fonts["clock"].get_height()
         tiny_h = fonts["tiny"].get_height()
         weather_bar_h = line_h + 16
         if sun_line:
+            weather_bar_h += tiny_h + 4
+        if tomorrow_line:
             weather_bar_h += tiny_h + 4
         if precip_alert:
             weather_bar_h += tiny_h + 4
@@ -694,6 +783,10 @@ def main():
             s_surf = fonts["tiny"].render(sun_line, True, DONE_COLOR)
             canvas.blit(s_surf, (margin + (wbar.width - s_surf.get_width()) // 2, wy))
             wy += tiny_h + 4
+        if tomorrow_line:
+            tm_surf = fonts["tiny"].render(tomorrow_line, True, DONE_COLOR)
+            canvas.blit(tm_surf, (margin + (wbar.width - tm_surf.get_width()) // 2, wy))
+            wy += tiny_h + 4
         if precip_alert:
             p_surf = fonts["tiny"].render(precip_alert, True, HEADER_COLOR)
             canvas.blit(p_surf, (margin + (wbar.width - p_surf.get_width()) // 2, wy))
@@ -705,8 +798,31 @@ def main():
             pw_surf = fonts["tiny"].render("\u26a0 " + power_warn, True, WARN_COLOR)
             canvas.blit(pw_surf, (margin + 12, margin + 6))
 
+        # Wi-Fi connectivity indicator in the weather bar's top-right corner.
+        wifi_size = max(10, tiny_h)
+        draw_wifi_icon(canvas, sw - margin - wifi_size - 6,
+                       margin + wifi_size + 4, wifi_size, is_online())
+
         # Everything below the weather bar starts here.
         top = margin + weather_bar_h + gap
+
+        # "Focus for today" banner (only if set), just under the weather bar.
+        if focus_text:
+            focus_h = fonts["clock"].get_height() + 18
+            fbar = pygame.Rect(margin, top, sw - 2 * margin, focus_h)
+            pygame.draw.rect(canvas, PANEL_COLOR, fbar, border_radius=12)
+            label_surf = fonts["tiny"].render("FOCUS", True, HEADER_COLOR)
+            canvas.blit(label_surf, (margin + 14, top + 8))
+            ftext = focus_text
+            fsurf = fonts["clock"].render(ftext, True, TEXT_COLOR)
+            avail = fbar.width - 28 - label_surf.get_width() - 12
+            if fsurf.get_width() > avail:
+                while fsurf.get_width() > avail and len(ftext) > 4:
+                    ftext = ftext[:-2]
+                    fsurf = fonts["clock"].render(ftext + "\u2026", True, TEXT_COLOR)
+            canvas.blit(fsurf, (margin + 14 + label_surf.get_width() + 12,
+                                top + (focus_h - fsurf.get_height()) // 2))
+            top += focus_h + gap
 
         # Reserve height for the habit cards band (matches phone-style cards:
         # header + a 7-wide, ~2-row day grid). Cards are 3 per row and wrap.
@@ -795,7 +911,7 @@ def main():
             screen.blit(rotated, (0, 0))
 
         pygame.display.flip()
-        clock.tick(10)  # 10 FPS is plenty; keeps CPU/RAM usage low
+        clock.tick(30)  # smooth on the Pi 5 (was capped at 10 for the Zero 2 W)
 
     pygame.quit()
     sys.exit(0)
