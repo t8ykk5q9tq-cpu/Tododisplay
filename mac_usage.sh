@@ -15,7 +15,8 @@
 
 # Pi tracker base URL (Tailscale address).
 TRACKER_URL="${TRACKER_URL:-http://100.102.96.42:5050}"
-IDLE_LIMIT=60   # seconds; considered "active" if last input was within this
+INTERVAL=10     # seconds between checks
+IDLE_LIMIT=15   # considered "active" if last input was within this (>= INTERVAL)
 
 # URL-encode helper (spaces etc. in app names).
 urlencode() {
@@ -47,12 +48,12 @@ while true; do
         app=$(frontmost_app)
         if [ -n "$app" ]; then
             enc=$(urlencode "Mac:$app")
-            curl -s -m 5 "$TRACKER_URL/activeminute?app=$enc" > /dev/null 2>&1 \
-                && echo "$(date '+%H:%M') active in: $app" \
-                || echo "$(date '+%H:%M') could not reach tracker"
+            curl -s -m 5 "$TRACKER_URL/activeminute?app=$enc&seconds=$INTERVAL" > /dev/null 2>&1 \
+                && echo "$(date '+%H:%M:%S') active in: $app (+${INTERVAL}s)" \
+                || echo "$(date '+%H:%M:%S') could not reach tracker"
         fi
     else
-        echo "$(date '+%H:%M') idle (${idle}s) - not logging"
+        echo "$(date '+%H:%M:%S') idle (${idle}s) - not logging"
     fi
-    sleep 60
+    sleep "$INTERVAL"
 done

@@ -440,16 +440,21 @@ def app_stop():
 
 @app.route("/activeminute")
 def active_minute():
-    """Add one active minute of usage for an app. Called by the Mac watcher
-    once per minute when you're active in a given frontmost app.
-    Usage: /activeminute?app=Mac:Chrome  (adds 60s + 1 'open' to today's total)."""
+    """Add a slice of active usage time for an app. Called by the Mac watcher
+    while you're active in a given frontmost app.
+    Usage: /activeminute?app=Mac:Chrome&seconds=10  (seconds defaults to 60)."""
     app_name = (request.args.get("app") or "").strip()
     if not app_name:
         return "Missing ?app=", 400
+    try:
+        secs = int(request.args.get("seconds", "60"))
+    except ValueError:
+        secs = 60
+    secs = max(1, min(secs, 300))  # sanity clamp
     data = load_appuse()
     today = date.today().isoformat()
     data.setdefault("totals", {}).setdefault(today, {})
-    data["totals"][today][app_name] = data["totals"][today].get(app_name, 0) + 60
+    data["totals"][today][app_name] = data["totals"][today].get(app_name, 0) + secs
     save_appuse(data)
     return "ok"
 
