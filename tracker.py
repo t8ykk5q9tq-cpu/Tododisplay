@@ -454,6 +454,17 @@ def _tiny_page(msg):
             f"<p>You can close this.</p></body></html>")
 
 
+# Map incoming ?app= names to a canonical category, tolerating casing and
+# stray spaces so an iOS Shortcut sending "youtube" or "YouTube " still matches
+# the exact-name checks used by nudges, limits, and focus/distraction.
+_CANON_APPS = {c.lower(): c for c in CATEGORIES}
+
+
+def normalize_app_name(raw):
+    key = (raw or "").strip()
+    return _CANON_APPS.get(key.lower(), key)
+
+
 # Ignore a repeat /appstart for the same app within this window (guards against
 # iOS "Is Opened" automations firing the request twice). Kept short so genuine
 # quick re-opens are still counted -- only true instant double-fires are dropped.
@@ -462,7 +473,7 @@ APPSTART_DEBOUNCE_SEC = 3
 
 @app.route("/appstart")
 def app_start():
-    app_name = (request.args.get("app") or "").strip()
+    app_name = normalize_app_name(request.args.get("app"))
     if not app_name:
         return "Missing ?app=", 400
     data = load_appuse()
@@ -492,7 +503,7 @@ def app_start():
 
 @app.route("/appstop")
 def app_stop():
-    app_name = (request.args.get("app") or "").strip()
+    app_name = normalize_app_name(request.args.get("app"))
     if not app_name:
         return "Missing ?app=", 400
     data = load_appuse()
