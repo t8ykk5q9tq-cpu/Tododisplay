@@ -28,6 +28,7 @@ MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
+JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")
 WATER_GOAL = int(os.environ.get("WATER_GOAL", "8"))
 METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
 METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
@@ -400,6 +401,16 @@ def read_focus():
     except sqlite3.Error:
         pass
     return ""
+
+
+def read_journal_today():
+    """Return today's one-line journal entry, or '' if none written today."""
+    today = datetime.now().date().isoformat()
+    try:
+        with open(JOURNAL_FILE) as f:
+            return str(json.load(f).get(today, "") or "")
+    except (OSError, json.JSONDecodeError):
+        return ""
 
 
 def read_tracker():
@@ -1102,6 +1113,7 @@ def main():
     tracker_data = None
     habits_data = []
     focus_text = ""
+    journal_text = ""
     update_str = last_update_str()
     ram_str = ram_usage_str()
 
@@ -1123,6 +1135,7 @@ def main():
             tracker_data = read_tracker()
             habits_data = read_habits()
             focus_text = read_focus()
+            journal_text = read_journal_today()
             update_str = last_update_str()
             ram_str = ram_usage_str()
             last_tick = now
@@ -1218,6 +1231,24 @@ def main():
             canvas.blit(fsurf, (margin + 14 + label_surf.get_width() + 12,
                                 top + (focus_h - fsurf.get_height()) // 2))
             top += focus_h + gap
+
+        # "Journal" banner (today's one-line entry), just under FOCUS.
+        if journal_text:
+            jrn_h = fonts["clock"].get_height() + 18
+            jbar = pygame.Rect(margin, top, sw - 2 * margin, jrn_h)
+            pygame.draw.rect(canvas, PANEL_COLOR, jbar, border_radius=12)
+            jlabel_surf = fonts["tiny"].render("JOURNAL", True, HEADER_COLOR)
+            canvas.blit(jlabel_surf, (margin + 14, top + 8))
+            jtext = journal_text
+            jsurf = fonts["clock"].render(jtext, True, TEXT_COLOR)
+            javail = jbar.width - 28 - jlabel_surf.get_width() - 12
+            if jsurf.get_width() > javail:
+                while jsurf.get_width() > javail and len(jtext) > 4:
+                    jtext = jtext[:-2]
+                    jsurf = fonts["clock"].render(jtext + "\u2026", True, TEXT_COLOR)
+            canvas.blit(jsurf, (margin + 14 + jlabel_surf.get_width() + 12,
+                                top + (jrn_h - jsurf.get_height()) // 2))
+            top += jrn_h + gap
 
         # Reserve height for the habit cards band (matches phone-style cards:
         # header + a 7-wide, ~2-row day grid). Cards are 3 per row and wrap.
