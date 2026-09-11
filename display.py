@@ -412,8 +412,8 @@ def draw_panel(screen, fonts, rect, title, items):
     pygame.draw.rect(screen, PANEL_COLOR, panel_rect, border_radius=16)
 
     pad = 24
-    # Title
-    title_surf = fonts["title"].render(title, True, HEADER_COLOR)
+    # Title (half-size header for the list panels)
+    title_surf = fonts["panel_title"].render(title, True, HEADER_COLOR)
     title_x = x + (w - title_surf.get_width()) // 2
     screen.blit(title_surf, (title_x, y + pad))
 
@@ -706,6 +706,8 @@ def main():
         "item": make_font(int(os.environ.get("ITEM_PT", max(18, min(sw, sh) // 19)))),
         "clock": make_font(int(os.environ.get("CLOCK_PT", max(14, min(sw, sh) // 27)))),
         "tiny": make_font(max(12, min(sw, sh) // 40)),
+        # Half-size title for the list panel headers (Todo / Shopping).
+        "panel_title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12)) / 2), bold=True),
     }
 
     clock = pygame.time.Clock()
