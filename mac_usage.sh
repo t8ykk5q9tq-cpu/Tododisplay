@@ -63,32 +63,35 @@ idle_seconds() {
     ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'
 }
 
-# Accumulate per-app seconds locally, then flush once per FLUSH_EVERY to the Pi
-# in a single request (far fewer disk writes on the Pi's SD card).
-declare -A tally
+# Accumulate samples locally, then flush once per FLUSH_EVERY to the Pi in a
+# single request (far fewer disk writes on the Pi's SD card). We use a temp
+# file of "app<TAB>seconds" lines so this works on the old bash 3.2 that ships
+# with macOS (no associative arrays needed).
+TALLY_FILE="$(mktemp -t macusage)"
 elapsed=0
 
 flush() {
-    # Build "Mac:App:secs,Mac:App2:secs" from the tally, then POST/GET it.
-    local data="" name secs enc
-    for name in "${!tally[@]}"; do
-        secs="${tally[$name]}"
-        [ "$secs" -gt 0 ] || continue
+    [ -s "$TALLY_FILE" ] || return
+    # Sum seconds per app, then build "Mac:App:secs,Mac:App2:secs".
+    local data=""
+    while IFS=$'\t' read -r name secs; do
+        [ -n "$name" ] || continue
         enc=$(urlencode "Mac:$name")
         data+="${enc}:${secs},"
-    done
+    done < <(awk -F'\t' '{t[$1]+=$2} END{for(a in t) print a"\t"t[a]}' "$TALLY_FILE")
+
     if [ -n "$data" ]; then
         if curl -s -m 5 "$TRACKER_URL/activebatch?data=${data%,}" > /dev/null 2>&1; then
             echo "$(date '+%H:%M:%S') flushed: $data"
-            tally=()   # clear only on success, so we don't lose unsent data
+            : > "$TALLY_FILE"   # clear only on success, so unsent data isn't lost
         else
             echo "$(date '+%H:%M:%S') could not reach tracker (kept tally)"
         fi
     fi
 }
 
-# Flush whatever we have if the script is stopped.
-trap 'flush; exit 0' INT TERM
+# Flush whatever we have if the script is stopped, and clean up.
+trap 'flush; rm -f "$TALLY_FILE"; exit 0' INT TERM
 
 echo "Mac usage tracker started -> $TRACKER_URL (sample ${INTERVAL}s, flush ${FLUSH_EVERY}s)"
 while true; do
@@ -97,7 +100,7 @@ while true; do
     if [ -z "$idle" ] || [ "$idle" -lt "$IDLE_LIMIT" ]; then
         app=$(frontmost_app)
         if [ -n "$app" ]; then
-            tally["$app"]=$(( ${tally["$app"]:-0} + INTERVAL ))
+            printf '%s\t%s\n' "$app" "$INTERVAL" >> "$TALLY_FILE"
         fi
     fi
     sleep "$INTERVAL"
