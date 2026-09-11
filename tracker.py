@@ -756,31 +756,63 @@ def daily_summary_push_thread():
         time.sleep(60)
 
 
-# Escalating nag messages as missed check-ins pile up.
-NAG_INTERVAL_MIN = 10  # only nag at most this often while you're behind
+def minutes_since_last_checkin():
+    """Minutes since your most recent check-in today (None if none today)."""
+    today = date.today().isoformat()
+    todays = [e for e in load_log() if str(e.get("timestamp", "")).startswith(today)]
+    if not todays:
+        return None
+    try:
+        last = datetime.fromisoformat(todays[-1]["timestamp"])
+        return (datetime.now() - last).total_seconds() / 60
+    except (ValueError, KeyError):
+        return None
+
+
+def nag_interval_for(silent_min):
+    """How often to nag (minutes), based on how long since the last check-in.
+    The longer the silence, the more frequent the nagging."""
+    if silent_min is None or silent_min >= 120:
+        return 5     # 2h+ silent -> every 5 min (relentless)
+    if silent_min >= 90:
+        return 8
+    if silent_min >= 60:
+        return 10    # over an hour -> ramp up
+    return 20        # mildly behind but recent -> occasional
 
 
 def compliance_nag_thread():
-    """While you're behind on check-ins during waking hours, send escalating
-    nags. Also evaluate the daily compliance streak at end of day."""
+    """While you're behind on check-ins during waking hours, send nags that get
+    MORE frequent and harsher the longer you've gone silent. Also evaluate the
+    daily compliance streak at end of day."""
     last_nag = 0
     while True:
         now = datetime.now()
         c = compliance_today()
+        silent = minutes_since_last_checkin()
 
-        # Escalating nags while behind and awake.
-        if c["behind"] and is_awake and (time.time() - last_nag) >= NAG_INTERVAL_MIN * 60:
-            missed = c["missed"]
-            if missed >= 5:
-                msg = f"Seriously behind: {missed} check-ins missed today ({c['percent']}%). Log something NOW."
-            elif missed >= 3:
-                msg = f"You're slipping - {missed} check-ins missed ({c['percent']}%). Don't break your streak."
-            else:
-                msg = f"Behind on check-ins ({c['done']}/{c['expected']}). Tap to log."
-            cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
-            send_pushover(msg, title="Check-in compliance", url=cin_url,
-                          url_title="Log a check-in")
-            last_nag = time.time()
+        if c["behind"] and is_awake:
+            interval = nag_interval_for(silent)
+            if (time.time() - last_nag) >= interval * 60:
+                missed = c["missed"]
+                sm = int(silent) if silent is not None else None
+                # Wording escalates with how long you've been silent.
+                if sm is None:
+                    msg = (f"You haven't checked in AT ALL today. "
+                           f"{c['done']}/{c['expected']} - log something now.")
+                elif sm >= 120:
+                    msg = (f"{sm} min since your last check-in. This is bad - "
+                           f"{missed} missed ({c['percent']}%). LOG. NOW.")
+                elif sm >= 60:
+                    msg = (f"Over an hour ({sm} min) with no check-in. "
+                           f"{missed} missed - catch up before your streak dies.")
+                else:
+                    msg = (f"Behind on check-ins ({c['done']}/{c['expected']}). "
+                           f"Last one {sm} min ago. Tap to log.")
+                cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
+                send_pushover(msg, title="Check-in compliance", url=cin_url,
+                              url_title="Log a check-in")
+                last_nag = time.time()
 
         # End-of-day streak evaluation (once, after the compliance window).
         st = load_compliance_state()
