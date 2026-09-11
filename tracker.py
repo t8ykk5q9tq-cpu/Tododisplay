@@ -81,6 +81,14 @@ COMPLIANCE_END_HOUR = int(getattr(cfg, "COMPLIANCE_END_HOUR", 22))
 # You're "behind" if compliance drops below this fraction (0-1).
 COMPLIANCE_BEHIND_BELOW = float(getattr(cfg, "COMPLIANCE_BEHIND_BELOW", 0.7))
 
+# "Close the app" nudge: if a tracked app stays open longer than this many
+# minutes in one sitting, send a Pushover telling you to close it. Re-nudges
+# every APP_OPEN_RENUDGE_MIN while you're still in it. Set APP_OPEN_NUDGE_MIN=0
+# to disable. Applies to the app-open categories (TikTok/YouTube) by default.
+APP_OPEN_NUDGE_MIN = int(getattr(cfg, "APP_OPEN_NUDGE_MIN", 5))
+APP_OPEN_RENUDGE_MIN = int(getattr(cfg, "APP_OPEN_RENUDGE_MIN", 5))
+NUDGE_APPS = set(getattr(cfg, "NUDGE_APPS", ["TikTok", "YouTube"]))
+
 
 def classify_app(name):
     """Return 'focus', 'distraction', or 'neutral' for an app/category name."""
@@ -784,6 +792,40 @@ def nag_interval_for(silent_min):
     return 10        # behind but recent -> every 10 min
 
 
+def app_open_nudge_thread():
+    """Watch open app sessions. If a tracked app (NUDGE_APPS) stays open longer
+    than APP_OPEN_NUDGE_MIN, send a 'close it' nudge, re-nudging every
+    APP_OPEN_RENUDGE_MIN while it's still open. Clears when the app closes."""
+    if APP_OPEN_NUDGE_MIN <= 0:
+        return
+    last_nudge = {}  # app -> last nudge epoch (this open session)
+    while True:
+        data = load_appuse()
+        open_sessions = data.get("open", {})
+        now = time.time()
+        active_apps = set()
+        for app_name, start in open_sessions.items():
+            if app_name not in NUDGE_APPS:
+                continue
+            active_apps.add(app_name)
+            open_min = (now - start) / 60
+            if open_min < APP_OPEN_NUDGE_MIN:
+                continue
+            due = (app_name not in last_nudge or
+                   (now - last_nudge[app_name]) >= APP_OPEN_RENUDGE_MIN * 60)
+            if due:
+                send_pushover(
+                    f"You've been in {app_name} for {int(open_min)} min. "
+                    f"Close it and get back to it.",
+                    title="Close the app", priority=1)
+                last_nudge[app_name] = now
+        # Forget nudge state for apps that are no longer open (session ended).
+        for a in list(last_nudge):
+            if a not in active_apps:
+                del last_nudge[a]
+        time.sleep(30)
+
+
 def compliance_nag_thread():
     """While you're behind on check-ins during waking hours, send nags that get
     MORE frequent and harsher the longer you've gone silent. Also evaluate the
@@ -1000,5 +1042,6 @@ if __name__ == "__main__":
     Thread(target=habit_reminder_thread, daemon=True).start()
     Thread(target=daily_summary_push_thread, daemon=True).start()
     Thread(target=compliance_nag_thread, daemon=True).start()
+    Thread(target=app_open_nudge_thread, daemon=True).start()
     print("Time Tracker running on http://0.0.0.0:5050")
     app.run(host="0.0.0.0", port=5050, debug=False)

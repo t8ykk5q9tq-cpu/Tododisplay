@@ -54,6 +54,13 @@ COMPLIANCE_START_HOUR = 8      # start expecting check-ins at this hour
 COMPLIANCE_END_HOUR = 22       # stop expecting after this hour
 COMPLIANCE_BEHIND_BELOW = 0.7  # "behind" when you've done < 70% of expected
 
+# --- "Close the app" nudge (anti-doomscroll) ---
+# If a tracked app stays open longer than APP_OPEN_NUDGE_MIN in one sitting,
+# get a Pushover telling you to close it, repeating every APP_OPEN_RENUDGE_MIN.
+APP_OPEN_NUDGE_MIN = 5         # minutes before the first "close it" nudge
+APP_OPEN_RENUDGE_MIN = 5       # keep nudging this often while still open
+NUDGE_APPS = ["TikTok", "YouTube"]
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"
