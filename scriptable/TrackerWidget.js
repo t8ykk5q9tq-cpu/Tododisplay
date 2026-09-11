@@ -9,7 +9,7 @@
 //
 // Tapping the widget opens the check-in page so you can log an entry.
 
-const PI_HOST = "100.67.122.101:5050"; // Pi's Tailscale address + tracker port
+const PI_HOST = "100.102.96.42:5050"; // Pi's Tailscale address + tracker port
 const BASE_URL = `http://${PI_HOST}`;
 
 // --- Colors (match the app theme) ---

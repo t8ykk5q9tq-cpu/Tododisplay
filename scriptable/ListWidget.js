@@ -10,7 +10,7 @@
 // The widget is READ-ONLY (iOS widgets can't take text input). Tapping it
 // opens the full web interface so you can add/edit items.
 
-const PI_HOST = "100.67.122.101:5000"; // Pi's Tailscale address
+const PI_HOST = "100.102.96.42:5000"; // Pi's Tailscale address
 const BASE_URL = `http://${PI_HOST}`;
 
 // --- Colors ---

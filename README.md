@@ -77,7 +77,7 @@ Time tracker:    `http://<pi>:5050`
 
 On the same Wi-Fi use the Pi's LAN IP (or `raspberrypi.local`). From anywhere,
 use **Tailscale** — install it on the Pi and your phone, then use the Pi's
-Tailscale address (e.g. `http://100.67.122.101:5000`). Add either page to your
+Tailscale address (e.g. `http://100.102.96.42:5000`). Add either page to your
 phone's home screen for one-tap access. There are also Scriptable widgets and
 Shortcuts in the `scriptable/` folder.
 

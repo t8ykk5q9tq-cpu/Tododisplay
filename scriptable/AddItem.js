@@ -7,7 +7,7 @@
 //
 // SETUP: set PI_HOST to your Pi's Tailscale address or MagicDNS name.
 
-const PI_HOST = "100.67.122.101:5000"; // Pi's Tailscale address
+const PI_HOST = "100.102.96.42:5000"; // Pi's Tailscale address
 const BASE_URL = `http://${PI_HOST}`;
 
 async function postItem(listType, text) {
