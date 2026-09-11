@@ -37,7 +37,8 @@ except ImportError:
         CHECKIN_INTERVAL_MIN = 30
         FOLLOWUP_MIN = 5
         HABIT_REMINDER_HOUR = 20  # 8pm
-        CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health", "Personal"]
+        CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health",
+                      "Personal", "TikTok", "YouTube"]
         PI_BASE_URL = ""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +52,8 @@ FOLLOWUP = int(getattr(cfg, "FOLLOWUP_MIN", 5)) * 60
 HABIT_REMINDER_HOUR = int(getattr(cfg, "HABIT_REMINDER_HOUR", 20))
 # Quick-pick categories for check-ins (buttons + tags + daily summary).
 CATEGORIES = list(getattr(cfg, "CATEGORIES",
-                          ["Work", "Break", "Meal", "Errands", "Health", "Personal"]))
+                          ["Work", "Break", "Meal", "Errands", "Health",
+                           "Personal", "TikTok", "YouTube"]))
 # The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
 # to the check-in page. Defaults to the Pi 5's Tailscale address; override in
 # tracker_config.py with PI_BASE_URL if it changes.
