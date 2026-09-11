@@ -32,7 +32,29 @@ urlencode() {
 }
 
 frontmost_app() {
-    osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null
+    # Get the frontmost app's real display name. Many Electron apps (Kiro,
+    # VS Code, Slack, etc.) report their process as "Electron", so we resolve
+    # the actual name from the app bundle's file path instead.
+    osascript <<'EOF' 2>/dev/null
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set procName to name of frontApp
+    try
+        set appPath to POSIX path of (application file of frontApp as alias)
+        -- e.g. ".../Kiro.app/" -> "Kiro"
+        set AppleScript's text item delimiters to "/"
+        set parts to text items of appPath
+        repeat with p in reverse of parts
+            if p ends with ".app" then
+                set procName to text 1 thru -5 of (p as string)
+                exit repeat
+            end if
+        end repeat
+        set AppleScript's text item delimiters to ""
+    end try
+    return procName
+end tell
+EOF
 }
 
 idle_seconds() {
