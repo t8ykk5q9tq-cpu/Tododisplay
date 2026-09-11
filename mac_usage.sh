@@ -15,8 +15,9 @@
 
 # Pi tracker base URL (Tailscale address).
 TRACKER_URL="${TRACKER_URL:-http://100.102.96.42:5050}"
-INTERVAL=10     # seconds between checks
-IDLE_LIMIT=15   # considered "active" if last input was within this (>= INTERVAL)
+INTERVAL=10       # seconds between samples
+IDLE_LIMIT=15     # considered "active" if last input was within this (>= INTERVAL)
+FLUSH_EVERY=60    # send accumulated samples to the Pi this often (one write)
 
 # URL-encode helper (spaces etc. in app names).
 urlencode() {
@@ -62,20 +63,47 @@ idle_seconds() {
     ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'
 }
 
-echo "Mac usage tracker started -> $TRACKER_URL"
+# Accumulate per-app seconds locally, then flush once per FLUSH_EVERY to the Pi
+# in a single request (far fewer disk writes on the Pi's SD card).
+declare -A tally
+elapsed=0
+
+flush() {
+    # Build "Mac:App:secs,Mac:App2:secs" from the tally, then POST/GET it.
+    local data="" name secs enc
+    for name in "${!tally[@]}"; do
+        secs="${tally[$name]}"
+        [ "$secs" -gt 0 ] || continue
+        enc=$(urlencode "Mac:$name")
+        data+="${enc}:${secs},"
+    done
+    if [ -n "$data" ]; then
+        if curl -s -m 5 "$TRACKER_URL/activebatch?data=${data%,}" > /dev/null 2>&1; then
+            echo "$(date '+%H:%M:%S') flushed: $data"
+            tally=()   # clear only on success, so we don't lose unsent data
+        else
+            echo "$(date '+%H:%M:%S') could not reach tracker (kept tally)"
+        fi
+    fi
+}
+
+# Flush whatever we have if the script is stopped.
+trap 'flush; exit 0' INT TERM
+
+echo "Mac usage tracker started -> $TRACKER_URL (sample ${INTERVAL}s, flush ${FLUSH_EVERY}s)"
 while true; do
     idle=$(idle_seconds)
     # Default to "active" if we couldn't read idle time, rather than lose data.
     if [ -z "$idle" ] || [ "$idle" -lt "$IDLE_LIMIT" ]; then
         app=$(frontmost_app)
         if [ -n "$app" ]; then
-            enc=$(urlencode "Mac:$app")
-            curl -s -m 5 "$TRACKER_URL/activeminute?app=$enc&seconds=$INTERVAL" > /dev/null 2>&1 \
-                && echo "$(date '+%H:%M:%S') active in: $app (+${INTERVAL}s)" \
-                || echo "$(date '+%H:%M:%S') could not reach tracker"
+            tally["$app"]=$(( ${tally["$app"]:-0} + INTERVAL ))
         fi
-    else
-        echo "$(date '+%H:%M:%S') idle (${idle}s) - not logging"
     fi
     sleep "$INTERVAL"
+    elapsed=$(( elapsed + INTERVAL ))
+    if [ "$elapsed" -ge "$FLUSH_EVERY" ]; then
+        flush
+        elapsed=0
+    fi
 done

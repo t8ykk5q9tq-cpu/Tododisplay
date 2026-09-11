@@ -459,6 +459,42 @@ def active_minute():
     return "ok"
 
 
+@app.route("/activebatch", methods=["POST", "GET"])
+def active_batch():
+    """Add several apps' active seconds in ONE request (one disk write).
+    Body/params: JSON {"App": seconds, ...} via POST, or ?data=App:secs,App2:secs.
+    Used by the Mac watcher to batch a minute of 10s samples."""
+    tallies = {}
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        for k, v in payload.items():
+            try:
+                tallies[str(k)] = int(v)
+            except (ValueError, TypeError):
+                pass
+    else:
+        # ?data=Mac:Chrome:40,Mac:Kiro:20
+        raw = request.args.get("data", "")
+        for part in raw.split(","):
+            if not part:
+                continue
+            name, _, secs = part.rpartition(":")
+            try:
+                tallies[name] = int(secs)
+            except ValueError:
+                pass
+    if not tallies:
+        return "No data", 400
+    data = load_appuse()
+    today = date.today().isoformat()
+    day = data.setdefault("totals", {}).setdefault(today, {})
+    for name, secs in tallies.items():
+        secs = max(1, min(secs, 3600))
+        day[name] = day.get(name, 0) + secs
+    save_appuse(data)  # single write for the whole batch
+    return "ok"
+
+
 def app_usage_today():
     """Return today's per-app usage as [{'app', 'seconds', 'opens'}], desc by time."""
     data = load_appuse()
