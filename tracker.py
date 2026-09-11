@@ -425,6 +425,35 @@ def app_usage_today():
     )
 
 
+def app_usage_week():
+    """Return the last 7 days of app usage:
+      {"days": ["Mon", ...],                 # oldest -> today, short labels
+       "apps": [{"app", "seconds", "opens",  # 7-day totals per app
+                 "daily": [sec_day0, ...]}]}  # per-day seconds for a mini chart
+    """
+    data = load_appuse()
+    totals = data.get("totals", {})
+    opens = data.get("opens", {})
+    days = [(date.today() - timedelta(days=i)) for i in range(6, -1, -1)]
+    day_keys = [d.isoformat() for d in days]
+    day_labels = [d.strftime("%a") for d in days]
+
+    apps = set()
+    for dk in day_keys:
+        apps |= set(totals.get(dk, {}))
+        apps |= set(opens.get(dk, {}))
+
+    result = []
+    for a in apps:
+        daily = [totals.get(dk, {}).get(a, 0) for dk in day_keys]
+        total_sec = sum(daily)
+        total_opens = sum(opens.get(dk, {}).get(a, 0) for dk in day_keys)
+        result.append({"app": a, "seconds": total_sec, "opens": total_opens,
+                       "daily": daily})
+    result.sort(key=lambda r: -r["seconds"])
+    return {"days": day_labels, "apps": result}
+
+
 @app.route("/categories")
 def categories():
     return jsonify({"categories": CATEGORIES})
@@ -466,6 +495,7 @@ def status():
         "summary": daily_summary(todays),
         "total_checkins": len(todays),
         "app_usage": app_usage_today(),
+        "app_week": app_usage_week(),
     })
 
 

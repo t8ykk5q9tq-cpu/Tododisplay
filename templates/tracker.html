@@ -70,6 +70,23 @@
         .sum-cat { color: #eaeaea; }
         .sum-time { color: #00d4ff; }
         .sum-total { color: #8a8a9a; font-size: 0.85rem; margin-top: 0.5rem; }
+        /* App usage rows */
+        .app-row { display: flex; justify-content: space-between; align-items: baseline;
+            padding: 0.4rem 0; border-bottom: 1px solid #0f3460; }
+        .app-row:last-child { border-bottom: none; }
+        .app-name { color: #eaeaea; }
+        .app-val { color: #00d4ff; }
+        .app-opens { color: #8a8a9a; font-size: 0.8rem; margin-left: 6px; }
+        /* Weekly mini bar chart per app */
+        .week-app { margin-bottom: 0.9rem; }
+        .week-head { display: flex; justify-content: space-between; margin-bottom: 0.35rem; }
+        .week-bars { display: flex; gap: 4px; align-items: flex-end; height: 44px; }
+        .week-bar-col { flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: flex-end; height: 100%; }
+        .week-bar { width: 100%; background: #00d4ff; border-radius: 3px 3px 0 0;
+            min-height: 2px; }
+        .week-bar.empty { background: #0f3460; }
+        .week-day { color: #8a8a9a; font-size: 0.6rem; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -98,6 +115,18 @@
     <div class="card">
         <div class="recent-title">Today</div>
         <div id="summary"></div>
+    </div>
+
+    <!-- App usage today (time + opens) -->
+    <div class="card">
+        <div class="recent-title">App Time - Today</div>
+        <div id="app-today"></div>
+    </div>
+
+    <!-- App usage this week (7-day trend) -->
+    <div class="card">
+        <div class="recent-title">App Time - This Week</div>
+        <div id="app-week"></div>
     </div>
 
     <div class="card">
@@ -155,6 +184,50 @@
             ).join("") + `<div class="sum-total">${total} check-in(s) today</div>`;
         }
 
+        function fmtDur(secs) {
+            const m = Math.floor(secs / 60);
+            const h = Math.floor(m / 60), mm = m % 60;
+            return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+
+        function renderAppToday(usage) {
+            const el = document.getElementById("app-today");
+            if (!usage || usage.length === 0) {
+                el.innerHTML = '<div class="app-row"><span class="app-name">None today</span></div>';
+                return;
+            }
+            el.innerHTML = usage.map(a =>
+                `<div class="app-row"><span class="app-name">${a.app}</span>` +
+                `<span><span class="app-val">${fmtDur(a.seconds)}</span>` +
+                `<span class="app-opens">${a.opens}\u00d7</span></span></div>`
+            ).join("");
+        }
+
+        function renderAppWeek(week) {
+            const el = document.getElementById("app-week");
+            if (!week || !week.apps || week.apps.length === 0) {
+                el.innerHTML = '<div class="app-row"><span class="app-name">No data this week</span></div>';
+                return;
+            }
+            const days = week.days || [];
+            el.innerHTML = week.apps.map(a => {
+                const peak = Math.max(1, ...a.daily);
+                const bars = a.daily.map((sec, i) => {
+                    const pct = Math.round((sec / peak) * 100);
+                    const cls = sec > 0 ? "week-bar" : "week-bar empty";
+                    const h = sec > 0 ? Math.max(6, pct) : 4;
+                    return `<div class="week-bar-col">` +
+                        `<div class="${cls}" style="height:${h}%"></div>` +
+                        `<div class="week-day">${days[i] || ""}</div></div>`;
+                }).join("");
+                return `<div class="week-app">` +
+                    `<div class="week-head"><span class="app-name">${a.app}</span>` +
+                    `<span><span class="app-val">${fmtDur(a.seconds)}</span>` +
+                    `<span class="app-opens">${a.opens}\u00d7</span></span></div>` +
+                    `<div class="week-bars">${bars}</div></div>`;
+            }).join("");
+        }
+
         let quickBuilt = false;
         function buildQuickButtons(categories) {
             if (quickBuilt || !categories) return;
@@ -190,6 +263,8 @@
             buildQuickButtons(s.categories);
             renderRecent(s.recent);
             renderSummary(s.summary, s.total_checkins);
+            renderAppToday(s.app_usage);
+            renderAppWeek(s.app_week);
             updateCountdown();
         }
 
