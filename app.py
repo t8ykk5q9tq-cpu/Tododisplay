@@ -344,8 +344,147 @@ WEATHER_LON = os.environ.get("WEATHER_LON", "-93.2650")
 WEATHER_UNITS = os.environ.get("WEATHER_UNITS", "fahrenheit")
 COUNT_ONLY = {"TikTok", "YouTube"}
 APP_LIMIT_SEC = int(os.environ.get("APP_TIME_LIMIT_MIN", "60")) * 60
+MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
+SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
+COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
+COMPLIANCE_START_HOUR = int(os.environ.get("COMPLIANCE_START_HOUR", "8"))
+COMPLIANCE_END_HOUR = int(os.environ.get("COMPLIANCE_END_HOUR", "22"))
+TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
+DISTRACTION_APPS = {"TikTok", "YouTube"}
 _wx = {"data": None}
 _wx_lock = Lock()
+
+
+def _classify_app(name):
+    """'focus' for Mac apps, 'distraction' for TikTok/YouTube, else 'neutral'."""
+    if name in DISTRACTION_APPS:
+        return "distraction"
+    if name.startswith("Mac:"):
+        return "focus"
+    return "neutral"
+
+
+def _board_focus(au, today):
+    """Today's focus vs distraction seconds + longest focus streak."""
+    totals = au.get("totals", {}).get(today, {})
+    focus = sum(s for a, s in totals.items() if _classify_app(a) == "focus")
+    distraction = sum(s for a, s in totals.items()
+                      if _classify_app(a) == "distraction")
+    longest = au.get("focus_streak", {}).get(today, {}).get("longest", 0)
+    return {"focus_sec": focus, "distraction_sec": distraction,
+            "longest_focus_sec": longest}
+
+
+def _board_mac_week(au):
+    """7-day totals for Mac apps (top 5) with per-day breakdown."""
+    today = date.today()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    totals_by_day = au.get("totals", {})
+    per_app = {}
+    for d in days:
+        for a, s in totals_by_day.get(d, {}).items():
+            if _classify_app(a) == "focus":
+                bucket = per_app.setdefault(a, {})
+                bucket[d] = bucket.get(d, 0) + s
+    rows = []
+    for a, byday in per_app.items():
+        daily = [byday.get(d, 0) for d in days]
+        rows.append({"app": a.replace("Mac:", ""), "seconds": sum(daily),
+                     "daily": daily})
+    rows.sort(key=lambda r: -r["seconds"])
+    # Weekday label per day (Python weekday(): Mon=0..Sun=6 -> our labels index)
+    py_to_lbl = {0: "Mo", 1: "Tu", 2: "We", 3: "Th", 4: "Fr", 5: "Sa", 6: "Su"}
+    day_labels = [py_to_lbl[datetime.fromisoformat(d).weekday()] for d in days]
+    return {"apps": rows[:5], "days": day_labels}
+
+
+def _board_mood(today):
+    all_moods = _read_json(MOOD_FILE, [])
+    todays = [m for m in all_moods
+              if str(m.get("timestamp", "")).startswith(today)]
+    if not todays:
+        return None
+    avg = sum(m["value"] for m in todays) / len(todays)
+    return {"latest": todays[-1]["value"], "avg": round(avg, 1),
+            "count": len(todays)}
+
+
+def _board_compliance(today, done_count):
+    now = datetime.now()
+    start_min = COMPLIANCE_START_HOUR * 60
+    end_min = COMPLIANCE_END_HOUR * 60
+    now_min = now.hour * 60 + now.minute
+    interval = max(1, TRACKER_INTERVAL_MIN)
+    elapsed = max(0, min(now_min, end_min) - start_min)
+    expected = elapsed // interval
+    pct = min(100, int(round((done_count / expected) * 100))) if expected else 100
+    before = now_min < start_min
+    behind = (not before) and expected > 0 and (done_count / expected) < 0.7
+    streak = _read_json(COMPLIANCE_FILE, {}).get("streak", 0)
+    return {"expected": expected, "done": done_count,
+            "missed": max(0, expected - done_count), "percent": pct,
+            "behind": behind, "streak": streak}
+
+
+def _board_sleep():
+    """Last night's duration + weekly averages/regularity from sleep_log."""
+    import math
+    events = sorted(_read_json(SLEEP_FILE, []),
+                    key=lambda e: e.get("timestamp", ""))
+    nights = []
+    pending = None
+    in_bed = False
+    for e in events:
+        try:
+            ts = datetime.fromisoformat(e["timestamp"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if e.get("kind") == "sleep":
+            pending = ts
+            in_bed = True
+        elif e.get("kind") == "wake" and pending is not None:
+            dur = int((ts - pending).total_seconds() // 60)
+            if 0 < dur <= 20 * 60:
+                nights.append({"bed_min": pending.hour * 60 + pending.minute,
+                               "wake_min": ts.hour * 60 + ts.minute,
+                               "dur": dur})
+            pending = None
+            in_bed = False
+    recent = nights[-7:]
+    if not recent:
+        return {"in_bed": in_bed} if in_bed else None
+
+    def circ_mean(vals):
+        xs = ys = 0.0
+        for m in vals:
+            ang = (m / 1440.0) * 2 * math.pi
+            xs += math.cos(ang)
+            ys += math.sin(ang)
+        ang = math.atan2(ys, xs)
+        if ang < 0:
+            ang += 2 * math.pi
+        return int(round((ang / (2 * math.pi)) * 1440)) % 1440
+
+    def circ_std(vals):
+        if len(vals) < 2:
+            return None
+        xs = ys = 0.0
+        for m in vals:
+            ang = (m / 1440.0) * 2 * math.pi
+            xs += math.cos(ang)
+            ys += math.sin(ang)
+        r = min(max(math.sqrt(xs * xs + ys * ys) / len(vals), 1e-9), 1.0)
+        return int(round((math.sqrt(-2 * math.log(r)) / (2 * math.pi)) * 1440))
+
+    beds = [n["bed_min"] for n in recent]
+    durs = [n["dur"] for n in recent]
+    return {
+        "in_bed": in_bed,
+        "last_dur_min": recent[-1]["dur"],
+        "avg_bed_min": circ_mean(beds),
+        "avg_dur_min": int(sum(durs) / len(durs)),
+        "regularity_min": circ_std(beds),
+    }
 
 WEATHER_CODES = {
     0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -442,6 +581,11 @@ def api_board():
         "next_in": next_in, "is_awake": state.get("is_awake", True),
         "apps": apps,
         "weather": weather,
+        "focus_stats": _board_focus(au, today),
+        "mac_week": _board_mac_week(au),
+        "mood": _board_mood(today),
+        "compliance": _board_compliance(today, len(todays)),
+        "sleep": _board_sleep(),
     })
 
 

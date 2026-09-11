@@ -19,7 +19,7 @@
         .bar .weather { font-size: 1.1rem; }
         .bar .focus { color: #00d4ff; font-weight: 600; }
         .bar .net { font-size: 0.85rem; }
-        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; overflow: hidden; }
+        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; gap: 12px; overflow: hidden; }
         .panel {
             background: #16213e; border-radius: 14px; padding: 16px;
             display: flex; flex-direction: column; overflow: hidden;
@@ -46,6 +46,21 @@
         .app-opens { color: #8a8a9a; font-size: 0.8rem; margin-left: 8px; }
         .empty { color: #8a8a9a; font-style: italic; }
         .clock { text-align: center; color: #6a6a78; font-size: 0.85rem; flex-shrink: 0; }
+        .stat-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.95rem; }
+        .stat-row .v { color: #00d4ff; }
+        .fd-bar { height: 12px; border-radius: 6px; overflow: hidden; background: #e94560; margin: 8px 0; }
+        .fd-bar > div { height: 100%; background: #00d4ff; }
+        .sub { color: #8a8a9a; font-size: 0.85rem; }
+        .warn { color: #e94560; }
+        .good { color: #00d4ff; }
+        .mid { color: #f5a623; }
+        .weekrow { margin-top: 6px; }
+        .weekrow .head { display: flex; justify-content: space-between; font-size: 0.9rem; }
+        .bars { display: flex; align-items: flex-end; gap: 4px; height: 42px; margin-top: 4px; }
+        .bars .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+        .bars .b { width: 100%; background: #00d4ff; border-radius: 3px 3px 0 0; min-height: 3px; }
+        .bars .b.empty { background: #2a2f4a; }
+        .bars .d { font-size: 0.65rem; color: #6a6a78; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -81,6 +96,24 @@
                 <div id="apps"></div>
             </div>
         </div>
+        <div class="col2">
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Focus vs Distraction</h2>
+                <div id="focus-stats"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Sleep</h2>
+                <div id="sleep"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Mood &amp; Check-ins</h2>
+                <div id="mood-comp"></div>
+            </div>
+            <div class="panel" style="flex:1">
+                <h2>Mac - This Week</h2>
+                <div id="mac-week" style="overflow-y:auto;flex:1"></div>
+            </div>
+        </div>
     </div>
 
     <div class="clock" id="clock"></div>
@@ -95,6 +128,91 @@
         function fmtCountdown(s) {
             const m = Math.floor(s / 60), sec = s % 60;
             return `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+        }
+        function fmtClock(min) {
+            if (min == null) return "--";
+            const h = Math.floor((((min % 1440) + 1440) % 1440) / 60);
+            const m = ((min % 60) + 60) % 60;
+            return String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+        }
+        function fmtHrs(min) {
+            if (min == null) return "--";
+            const h = Math.floor(min / 60), m = min % 60;
+            return h ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function renderFocusStats(fs) {
+            const el = $("focus-stats");
+            if (!fs || (!fs.focus_sec && !fs.distraction_sec)) {
+                el.innerHTML = '<div class="empty">No data yet</div>'; return;
+            }
+            const f = fs.focus_sec, d = fs.distraction_sec, total = f + d || 1;
+            const fpct = Math.round((f / total) * 100);
+            el.innerHTML =
+                `<div class="stat-row"><span class="good">Focus</span><span class="v">${fmtDur(f)}</span></div>` +
+                `<div class="stat-row"><span class="warn">Distraction</span><span class="warn">${fmtDur(d)}</span></div>` +
+                `<div class="fd-bar"><div style="width:${fpct}%"></div></div>` +
+                (fs.longest_focus_sec ? `<div class="sub">Longest focus streak: ${fmtDur(fs.longest_focus_sec)}</div>` : "");
+        }
+
+        function renderSleep(sl) {
+            const el = $("sleep");
+            if (!sl || (sl.last_dur_min == null && !sl.in_bed)) {
+                el.innerHTML = '<div class="empty">No sleep logged yet</div>'; return;
+            }
+            if (sl.last_dur_min == null && sl.in_bed) {
+                el.innerHTML = '<div class="stat-row"><span class="mid">In bed now</span></div>'; return;
+            }
+            const reg = sl.regularity_min;
+            const regCls = reg == null ? "sub" : (reg <= 30 ? "good" : (reg <= 60 ? "mid" : "warn"));
+            const regTxt = reg == null ? "--" : `\u00b1${reg}m`;
+            el.innerHTML =
+                `<div class="stat-row"><span>Last night</span><span class="v">${fmtHrs(sl.last_dur_min)}</span></div>` +
+                `<div class="stat-row"><span>Avg bedtime</span><span class="v">${fmtClock(sl.avg_bed_min)}</span></div>` +
+                `<div class="stat-row"><span>Avg duration</span><span class="v">${fmtHrs(sl.avg_dur_min)}</span></div>` +
+                `<div class="stat-row"><span>Regularity</span><span class="${regCls}">${regTxt}</span></div>` +
+                (sl.in_bed ? '<div class="sub mid">Currently in bed</div>' : "");
+        }
+
+        function renderMoodComp(mood, comp) {
+            const el = $("mood-comp");
+            let html = "";
+            if (mood) {
+                html += `<div class="stat-row"><span>Mood</span><span class="v">${mood.latest}/5 (avg ${mood.avg})</span></div>`;
+            } else {
+                html += '<div class="stat-row"><span>Mood</span><span class="sub">none yet</span></div>';
+            }
+            if (comp && comp.expected > 0) {
+                if (comp.behind) {
+                    html += `<div class="stat-row"><span class="warn">\u26a0 Behind</span>` +
+                        `<span class="warn">${comp.done}/${comp.expected} (${comp.percent}%)</span></div>`;
+                } else {
+                    const cls = comp.percent >= 90 ? "good" : "";
+                    html += `<div class="stat-row"><span>Check-ins</span>` +
+                        `<span class="${cls}">${comp.done}/${comp.expected} (${comp.percent}%)</span></div>`;
+                }
+                html += `<div class="stat-row"><span>Streak</span><span class="v">${comp.streak}d</span></div>`;
+            }
+            el.innerHTML = html;
+        }
+
+        function renderMacWeek(mw) {
+            const el = $("mac-week");
+            if (!mw || !mw.apps || mw.apps.length === 0) {
+                el.innerHTML = '<div class="empty">No Mac data this week</div>'; return;
+            }
+            const days = mw.days || [];
+            el.innerHTML = mw.apps.map(a => {
+                const peak = Math.max(1, ...a.daily);
+                const bars = a.daily.map((sec, i) => {
+                    const h = sec > 0 ? Math.max(8, Math.round((sec / peak) * 100)) : 5;
+                    const cls = sec > 0 ? "b" : "b empty";
+                    return `<div class="col"><div class="${cls}" style="height:${h}%"></div><div class="d">${days[i] || ""}</div></div>`;
+                }).join("");
+                return `<div class="weekrow"><div class="head"><span>${a.app}</span>` +
+                    `<span class="v">${fmtDur(a.seconds)}</span></div>` +
+                    `<div class="bars">${bars}</div></div>`;
+            }).join("");
         }
 
         function renderList(el, items) {
@@ -141,6 +259,11 @@
                     `<span class="app-opens">${a.opens}\u00d7</span></span></div>`
                 ).join("")
                 : '<div class="empty">None today</div>';
+
+            renderFocusStats(d.focus_stats);
+            renderSleep(d.sleep);
+            renderMoodComp(d.mood, d.compliance);
+            renderMacWeek(d.mac_week);
         }
 
         function tickClock() {
