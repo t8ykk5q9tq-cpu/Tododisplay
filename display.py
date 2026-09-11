@@ -659,14 +659,18 @@ def draw_app_opens(screen, fonts, rect, app_opens):
     screen.blit(title_surf, (x + pad, y + pad))
 
     line_y = y + pad + title_surf.get_height() + 10
-    line_h = fonts["item"].get_height() + 10
+    # Each app uses TWO lines: the name, then "time  Nx" beneath it. This keeps
+    # everything readable in a narrow box with no overlapping text.
+    name_font = fonts["item"]
+    val_font = fonts["tiny"]
+    row_h = name_font.get_height() + val_font.get_height() + 12
     bottom = y + h - pad
     if not app_opens:
         empty = fonts["item"].render("None today", True, DONE_COLOR)
         screen.blit(empty, (x + pad, line_y))
         return
     for a in app_opens:
-        if line_y + line_h > bottom:
+        if line_y + row_h > bottom:
             break
         secs = a.get("seconds", 0)
         mins = secs // 60
@@ -674,18 +678,23 @@ def draw_app_opens(screen, fonts, rect, app_opens):
         tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
         opens = a.get("opens", 0)
         over = a.get("over_limit")
-        # Over the daily limit -> name + time in red; otherwise cyan time.
         name_color = WARN_COLOR if over else TEXT_COLOR
-        time_color = WARN_COLOR if over else HEADER_COLOR
-        val_surf = fonts["item"].render(tstr, True, time_color)
-        opens_surf = fonts["tiny"].render(f"{opens}\u00d7", True, DONE_COLOR)
-        name_surf = fonts["item"].render(a["category"], True, name_color)
+        val_color = WARN_COLOR if over else HEADER_COLOR
+
+        # Line 1: app name (truncated to fit the box width).
+        name = a["category"]
+        max_w = w - 2 * pad
+        name_surf = name_font.render(name, True, name_color)
+        while name_surf.get_width() > max_w and len(name) > 3:
+            name = name[:-2]
+            name_surf = name_font.render(name + "\u2026", True, name_color)
         screen.blit(name_surf, (x + pad, line_y))
-        # Right-align: opens count, then time to its left.
-        ox = x + w - pad - opens_surf.get_width()
-        screen.blit(opens_surf, (ox, line_y + 3))
-        screen.blit(val_surf, (ox - 10 - val_surf.get_width(), line_y))
-        line_y += line_h
+
+        # Line 2: "13m   5x" (time + opens, spaced clearly).
+        val_surf = val_font.render(f"{tstr}    {opens}\u00d7", True, val_color)
+        screen.blit(val_surf, (x + pad, line_y + name_font.get_height() + 2))
+
+        line_y += row_h
 
 
 def draw_tracker(screen, fonts, rect, tracker):
