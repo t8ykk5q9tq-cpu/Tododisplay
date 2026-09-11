@@ -367,8 +367,9 @@ def _tiny_page(msg):
 
 
 # Ignore a repeat /appstart for the same app within this window (guards against
-# iOS "Is Opened" automations firing the request twice).
-APPSTART_DEBOUNCE_SEC = 60
+# iOS "Is Opened" automations firing the request twice). Kept short so genuine
+# quick re-opens are still counted -- only true instant double-fires are dropped.
+APPSTART_DEBOUNCE_SEC = 3
 
 
 @app.route("/appstart")
@@ -379,13 +380,22 @@ def app_start():
     data = load_appuse()
     now = time.time()
     prev_open = data["open"].get(app_name)
-    # Debounce: if we already have a very recent open for this app, treat this
-    # as a duplicate fire - keep the existing session, don't count a new open.
-    if prev_open is not None and (now - prev_open) < APPSTART_DEBOUNCE_SEC:
-        save_appuse(data)
-        return _tiny_page(f"{app_name}: already open")
-    data["open"][app_name] = now
     today = date.today().isoformat()
+
+    if prev_open is not None:
+        gap = now - prev_open
+        # A truly instant repeat (same fire twice) is a duplicate: ignore it.
+        if gap < APPSTART_DEBOUNCE_SEC:
+            save_appuse(data)
+            return _tiny_page(f"{app_name}: already open")
+        # Otherwise a previous session was left open (missed /appstop). Bank
+        # its time now instead of losing it, then start the new session.
+        if 0 < gap <= MAX_SESSION_SEC:
+            data.setdefault("totals", {}).setdefault(today, {})
+            data["totals"][today][app_name] = \
+                data["totals"][today].get(app_name, 0) + int(gap)
+
+    data["open"][app_name] = now
     data.setdefault("opens", {}).setdefault(today, {})
     data["opens"][today][app_name] = data["opens"][today].get(app_name, 0) + 1
     save_appuse(data)
