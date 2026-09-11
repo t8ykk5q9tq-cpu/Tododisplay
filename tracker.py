@@ -372,7 +372,9 @@ def trigger():
     notification_pending.set()
     next_checkin_time = time.time() + INTERVAL
     persist_runtime_state()
-    send_pushover("Test notification from Time Tracker!")
+    cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
+    send_pushover("Test check-in! What have you been up to?",
+                  url=cin_url, url_title="Log a check-in")
     return jsonify({"status": "triggered"})
 
 
