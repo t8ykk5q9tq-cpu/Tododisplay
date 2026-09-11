@@ -413,15 +413,18 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
-    # App usage: real time spent, from open/close sessions.
+    # App usage: real time spent + open count, from open/close sessions.
     app_opens = []
     try:
         with open(APPUSE_FILE) as f:
             au = json.load(f)
         today = datetime.now().date().isoformat()
         totals = au.get("totals", {}).get(today, {})
+        opens = au.get("opens", {}).get(today, {})
+        names = set(totals) | set(opens)
         app_opens = sorted(
-            ({"category": a, "seconds": s} for a, s in totals.items()),
+            ({"category": a, "seconds": totals.get(a, 0),
+              "opens": opens.get(a, 0)} for a in names),
             key=lambda r: -r["seconds"],
         )
     except (OSError, json.JSONDecodeError):
@@ -663,11 +666,17 @@ def draw_app_opens(screen, fonts, rect, app_opens):
         secs = a.get("seconds", 0)
         mins = secs // 60
         hh, mm = divmod(mins, 60)
-        vstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+        tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+        opens = a.get("opens", 0)
+        # e.g. "47m  9x" (time in cyan, opens in muted grey)
+        val_surf = fonts["item"].render(tstr, True, HEADER_COLOR)
+        opens_surf = fonts["tiny"].render(f"{opens}\u00d7", True, DONE_COLOR)
         name_surf = fonts["item"].render(a["category"], True, TEXT_COLOR)
-        val_surf = fonts["item"].render(vstr, True, HEADER_COLOR)
         screen.blit(name_surf, (x + pad, line_y))
-        screen.blit(val_surf, (x + w - pad - val_surf.get_width(), line_y))
+        # Right-align: opens count, then time to its left.
+        ox = x + w - pad - opens_surf.get_width()
+        screen.blit(opens_surf, (ox, line_y + 3))
+        screen.blit(val_surf, (ox - 10 - val_surf.get_width(), line_y))
         line_y += line_h
 
 

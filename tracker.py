@@ -370,6 +370,10 @@ def app_start():
         return "Missing ?app=", 400
     data = load_appuse()
     data["open"][app_name] = time.time()
+    # Count this open in today's per-app open tally.
+    today = date.today().isoformat()
+    data.setdefault("opens", {}).setdefault(today, {})
+    data["opens"][today][app_name] = data["opens"][today].get(app_name, 0) + 1
     save_appuse(data)
     return _tiny_page(f"Started: {app_name}")
 
@@ -396,12 +400,16 @@ def app_stop():
 
 
 def app_usage_today():
-    """Return today's per-app usage as [{'app': name, 'seconds': n}], desc."""
+    """Return today's per-app usage as [{'app', 'seconds', 'opens'}], desc by time."""
     data = load_appuse()
     today = date.today().isoformat()
     totals = data.get("totals", {}).get(today, {})
+    opens = data.get("opens", {}).get(today, {})
+    # Include apps that have either time or opens recorded today.
+    names = set(totals) | set(opens)
     return sorted(
-        ({"app": a, "seconds": s} for a, s in totals.items()),
+        ({"app": a, "seconds": totals.get(a, 0), "opens": opens.get(a, 0)}
+         for a in names),
         key=lambda r: -r["seconds"],
     )
 
