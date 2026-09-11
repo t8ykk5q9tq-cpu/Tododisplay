@@ -140,7 +140,8 @@ def _pushover_budget_increment():
         pass
 
 
-def send_pushover(message, title="Time Tracker", url=None, url_title=None):
+def send_pushover(message, title="Time Tracker", url=None, url_title=None,
+                  priority=0):
     if not cfg.PUSHOVER_USER or not cfg.PUSHOVER_TOKEN:
         return  # notifications disabled
     # Stay within Pushover's free 10,000/month by capping each day at
@@ -153,6 +154,8 @@ def send_pushover(message, title="Time Tracker", url=None, url_title=None):
         "token": cfg.PUSHOVER_TOKEN, "user": cfg.PUSHOVER_USER,
         "title": title, "message": message, "sound": "vibrate",
     }
+    if priority:
+        payload["priority"] = priority   # 1 = high (bypasses quiet hours)
     if url:
         payload["url"] = url
         if url_title:
@@ -771,14 +774,14 @@ def minutes_since_last_checkin():
 
 def nag_interval_for(silent_min):
     """How often to nag (minutes), based on how long since the last check-in.
-    The longer the silence, the more frequent the nagging."""
-    if silent_min is None or silent_min >= 120:
-        return 5     # 2h+ silent -> every 5 min (relentless)
-    if silent_min >= 90:
-        return 8
-    if silent_min >= 60:
-        return 10    # over an hour -> ramp up
-    return 20        # mildly behind but recent -> occasional
+    Aggressive: ramps up fast and gets relentless the longer you're silent."""
+    if silent_min is None or silent_min >= 60:
+        return 3     # 1h+ silent (or nothing today) -> every 3 min (relentless)
+    if silent_min >= 45:
+        return 4
+    if silent_min >= 30:
+        return 5     # half hour -> already nagging hard
+    return 10        # behind but recent -> every 10 min
 
 
 def compliance_nag_thread():
@@ -796,22 +799,30 @@ def compliance_nag_thread():
             if (time.time() - last_nag) >= interval * 60:
                 missed = c["missed"]
                 sm = int(silent) if silent is not None else None
-                # Wording escalates with how long you've been silent.
+                # Wording + priority escalate with how long you've been silent.
+                # priority 1 = high (louder, bypasses quiet hours).
+                prio = 0
                 if sm is None:
                     msg = (f"You haven't checked in AT ALL today. "
-                           f"{c['done']}/{c['expected']} - log something now.")
-                elif sm >= 120:
-                    msg = (f"{sm} min since your last check-in. This is bad - "
-                           f"{missed} missed ({c['percent']}%). LOG. NOW.")
+                           f"{c['done']}/{c['expected']} - LOG SOMETHING NOW.")
+                    prio = 1
+                elif sm >= 90:
+                    msg = (f"{sm} min silent. This is embarrassing - "
+                           f"{missed} missed ({c['percent']}%). LOG. RIGHT. NOW.")
+                    prio = 1
                 elif sm >= 60:
-                    msg = (f"Over an hour ({sm} min) with no check-in. "
-                           f"{missed} missed - catch up before your streak dies.")
+                    msg = (f"Over an hour ({sm} min), no check-in. {missed} missed. "
+                           f"Your streak is on the line. Log now.")
+                    prio = 1
+                elif sm >= 30:
+                    msg = (f"{sm} min since last check-in - you're falling behind "
+                           f"({c['done']}/{c['expected']}). Log now.")
                 else:
                     msg = (f"Behind on check-ins ({c['done']}/{c['expected']}). "
                            f"Last one {sm} min ago. Tap to log.")
                 cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
                 send_pushover(msg, title="Check-in compliance", url=cin_url,
-                              url_title="Log a check-in")
+                              url_title="Log a check-in", priority=prio)
                 last_nag = time.time()
 
         # End-of-day streak evaluation (once, after the compliance window).
