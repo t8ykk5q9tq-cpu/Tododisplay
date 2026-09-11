@@ -48,6 +48,8 @@ STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")  # per-app session times
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")     # mood check-ins (1-5)
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
+WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water glasses per day
+METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")  # daily numeric metric (weight)
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
@@ -90,6 +92,13 @@ COMPLIANCE_BEHIND_BELOW = float(getattr(cfg, "COMPLIANCE_BEHIND_BELOW", 0.7))
 APP_OPEN_NUDGE_MIN = int(getattr(cfg, "APP_OPEN_NUDGE_MIN", 5))
 APP_OPEN_RENUDGE_MIN = int(getattr(cfg, "APP_OPEN_RENUDGE_MIN", 5))
 NUDGE_APPS = set(getattr(cfg, "NUDGE_APPS", ["TikTok", "YouTube"]))
+
+# Hydration: daily goal in glasses. Tap logs a glass; the board/display show a
+# progress bar toward this goal.
+WATER_GOAL = int(getattr(cfg, "WATER_GOAL", 8))
+# Daily numeric metric (e.g. weight). METRIC_LABEL/UNIT are display-only.
+METRIC_LABEL = str(getattr(cfg, "METRIC_LABEL", "Weight"))
+METRIC_UNIT = str(getattr(cfg, "METRIC_UNIT", "lb"))
 
 
 def classify_app(name):
@@ -646,6 +655,103 @@ def log_mood():
     return jsonify({"status": "ok", "value": value})
 
 
+def load_water():
+    """Return {'YYYY-MM-DD': glasses} dict."""
+    if os.path.exists(WATER_FILE):
+        try:
+            with open(WATER_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_water(data):
+    with open(WATER_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def water_today():
+    """Return {'glasses', 'goal', 'percent'} for today."""
+    data = load_water()
+    glasses = int(data.get(date.today().isoformat(), 0))
+    pct = min(100, int(round((glasses / WATER_GOAL) * 100))) if WATER_GOAL else 0
+    return {"glasses": glasses, "goal": WATER_GOAL, "percent": pct}
+
+
+@app.route("/water", methods=["GET", "POST"])
+def log_water():
+    """Adjust today's water count. /water?delta=1 adds a glass, delta=-1 undoes.
+    GET so a bookmark/Shortcut works; POST also accepted."""
+    if request.method == "POST":
+        delta = (request.get_json(silent=True) or {}).get("delta", 1)
+    else:
+        delta = request.args.get("delta", 1)
+    try:
+        delta = int(delta)
+    except (ValueError, TypeError):
+        delta = 1
+    data = load_water()
+    today = date.today().isoformat()
+    data[today] = max(0, int(data.get(today, 0)) + delta)
+    save_water(data)
+    return jsonify(water_today())
+
+
+def load_metric():
+    if os.path.exists(METRIC_FILE):
+        try:
+            with open(METRIC_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def metric_recent(days=30):
+    """Return the most recent numeric entries (last `days`), one per day
+    (latest wins), oldest-first, plus label/unit and latest value."""
+    entries = load_metric()
+    by_day = {}
+    for e in entries:
+        d = str(e.get("date") or str(e.get("timestamp", ""))[:10])
+        if d:
+            by_day[d] = e.get("value")
+    ordered = sorted(by_day.items())[-days:]
+    points = [{"date": d, "value": v} for d, v in ordered]
+    latest = points[-1]["value"] if points else None
+    prev = points[-2]["value"] if len(points) >= 2 else None
+    change = (round(latest - prev, 2) if (latest is not None and prev is not None)
+              else None)
+    return {"points": points, "latest": latest, "change": change,
+            "label": METRIC_LABEL, "unit": METRIC_UNIT}
+
+
+@app.route("/metric", methods=["GET", "POST"])
+def log_metric():
+    """Log today's numeric metric (e.g. weight). /metric?value=182.4"""
+    if request.method == "POST":
+        value = (request.get_json(silent=True) or {}).get("value")
+    else:
+        value = request.args.get("value")
+    try:
+        value = round(float(value), 2)
+    except (ValueError, TypeError):
+        return jsonify({"error": "numeric value required"}), 400
+    entries = load_metric()
+    today = date.today().isoformat()
+    # replace today's entry if it exists, else append
+    entries = [e for e in entries
+               if str(e.get("date") or str(e.get("timestamp", ""))[:10]) != today]
+    entries.append({"date": today, "value": value,
+                    "timestamp": datetime.now().isoformat()})
+    if len(entries) > 1000:
+        entries = entries[-1000:]
+    with open(METRIC_FILE, "w") as f:
+        json.dump(entries, f)
+    return jsonify(metric_recent())
+
+
 def load_sleep():
     if os.path.exists(SLEEP_FILE):
         try:
@@ -1100,6 +1206,8 @@ def status():
         "moods": moods_today(),
         "compliance": compliance_today(),
         "sleep": sleep_summary_week(),
+        "water": water_today(),
+        "metric": metric_recent(),
     })
 
 

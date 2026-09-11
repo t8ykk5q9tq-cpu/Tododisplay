@@ -346,6 +346,11 @@ COUNT_ONLY = {"TikTok", "YouTube"}
 APP_LIMIT_SEC = int(os.environ.get("APP_TIME_LIMIT_MIN", "60")) * 60
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
+WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
+METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
+WATER_GOAL = int(os.environ.get("WATER_GOAL", "8"))
+METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
+METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
 COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
 COMPLIANCE_START_HOUR = int(os.environ.get("COMPLIANCE_START_HOUR", "8"))
 COMPLIANCE_END_HOUR = int(os.environ.get("COMPLIANCE_END_HOUR", "22"))
@@ -486,6 +491,30 @@ def _board_sleep():
         "regularity_min": circ_std(beds),
     }
 
+
+def _board_water(today):
+    data = _read_json(WATER_FILE, {})
+    glasses = int(data.get(today, 0))
+    pct = min(100, int(round((glasses / WATER_GOAL) * 100))) if WATER_GOAL else 0
+    return {"glasses": glasses, "goal": WATER_GOAL, "percent": pct}
+
+
+def _board_metric():
+    entries = _read_json(METRIC_FILE, [])
+    by_day = {}
+    for e in entries:
+        d = str(e.get("date") or str(e.get("timestamp", ""))[:10])
+        if d:
+            by_day[d] = e.get("value")
+    ordered = sorted(by_day.items())[-30:]
+    points = [{"date": d, "value": v} for d, v in ordered]
+    latest = points[-1]["value"] if points else None
+    prev = points[-2]["value"] if len(points) >= 2 else None
+    change = (round(latest - prev, 2) if (latest is not None and prev is not None)
+              else None)
+    return {"points": points, "latest": latest, "change": change,
+            "label": METRIC_LABEL, "unit": METRIC_UNIT}
+
 WEATHER_CODES = {
     0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
     45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
@@ -586,6 +615,8 @@ def api_board():
         "mood": _board_mood(today),
         "compliance": _board_compliance(today, len(todays)),
         "sleep": _board_sleep(),
+        "water": _board_water(today),
+        "metric": _board_metric(),
     })
 
 

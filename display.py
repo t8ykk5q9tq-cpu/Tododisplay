@@ -26,6 +26,11 @@ TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
+WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
+METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
+WATER_GOAL = int(os.environ.get("WATER_GOAL", "8"))
+METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
+METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
 COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
 COMPLIANCE_START_HOUR = int(os.environ.get("COMPLIANCE_START_HOUR", "8"))
 COMPLIANCE_END_HOUR = int(os.environ.get("COMPLIANCE_END_HOUR", "22"))
@@ -573,11 +578,43 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
+    # Water: today's glasses vs goal.
+    water = None
+    try:
+        with open(WATER_FILE) as f:
+            wdata = json.load(f)
+        glasses = int(wdata.get(datetime.now().date().isoformat(), 0))
+        water = {"glasses": glasses, "goal": WATER_GOAL}
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
+    # Daily metric (e.g. weight): latest value + change vs previous day.
+    metric = None
+    try:
+        with open(METRIC_FILE) as f:
+            entries = json.load(f)
+        by_day = {}
+        for e in entries:
+            d = str(e.get("date") or str(e.get("timestamp", ""))[:10])
+            if d:
+                by_day[d] = e.get("value")
+        ordered = sorted(by_day.items())
+        if ordered:
+            latest = ordered[-1][1]
+            prev = ordered[-2][1] if len(ordered) >= 2 else None
+            change = (round(latest - prev, 2)
+                      if (latest is not None and prev is not None) else None)
+            metric = {"latest": latest, "change": change,
+                      "label": METRIC_LABEL, "unit": METRIC_UNIT}
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
             "summary": summary, "app_opens": app_opens,
             "total_today": total_today,
             "focus_stats": focus_stats, "mac_week": mac_week,
-            "mood": mood, "compliance": compliance, "sleep": sleep}
+            "mood": mood, "compliance": compliance, "sleep": sleep,
+            "water": water, "metric": metric}
 
 
 def last_update_str():
@@ -910,6 +947,26 @@ def draw_tracker(screen, fonts, rect, tracker):
         s_surf = fonts["tiny"].render(stext, True, scolor)
         screen.blit(s_surf, (x + pad, sleep_y))
 
+    # Water + daily metric line (third sub-line under the title).
+    water = tracker.get("water")
+    metric = tracker.get("metric")
+    if water or metric:
+        sub = fonts["tiny"].get_height() + 6
+        n_above = (1 if comp_has_line else 0) + (1 if sleep else 0)
+        wm_y = y + pad + title_surf.get_height() + 4 + sub * n_above
+        parts = []
+        if water:
+            parts.append(f"Water {water['glasses']}/{water['goal']}")
+        if metric and metric.get("latest") is not None:
+            chg = ""
+            if metric.get("change"):
+                arrow = "\u2191" if metric["change"] > 0 else "\u2193"
+                chg = f" {arrow}{abs(metric['change'])}"
+            parts.append(f"{metric['label']} {metric['latest']}{metric['unit']}{chg}")
+        if parts:
+            wm_surf = fonts["tiny"].render("   ".join(parts), True, HEADER_COLOR)
+            screen.blit(wm_surf, (x + pad, wm_y))
+
     next_in = tracker.get("next_in")
     awake = tracker.get("is_awake", True)
     if not awake:
@@ -932,7 +989,9 @@ def draw_tracker(screen, fonts, rect, tracker):
     sub_h = fonts["tiny"].get_height() + 6
     comp_offset = sub_h if (comp and comp["expected"] > 0) else 0
     sleep_offset = sub_h if tracker.get("sleep") else 0
-    content_y = y + pad + title_surf.get_height() + 12 + comp_offset + sleep_offset
+    wm_offset = sub_h if (tracker.get("water") or tracker.get("metric")) else 0
+    content_y = (y + pad + title_surf.get_height() + 12
+                 + comp_offset + sleep_offset + wm_offset)
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
     summary = tracker.get("summary") or []

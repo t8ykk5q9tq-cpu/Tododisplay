@@ -23,5 +23,7 @@ tracker.log
 app_usage.json
 mood_log.json
 sleep_log.json
+water_log.json
+metric_log.json
 compliance.json
 pushover_count.json

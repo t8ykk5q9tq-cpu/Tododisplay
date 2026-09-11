@@ -61,6 +61,11 @@ APP_OPEN_NUDGE_MIN = 5         # minutes before the first "close it" nudge
 APP_OPEN_RENUDGE_MIN = 5       # keep nudging this often while still open
 NUDGE_APPS = ["TikTok", "YouTube"]
 
+# --- Health: hydration + a daily numeric metric ---
+WATER_GOAL = 8                 # glasses of water per day (progress bar goal)
+METRIC_LABEL = "Weight"        # label for the daily number you log
+METRIC_UNIT = "lb"             # unit shown next to it (e.g. "lb", "kg")
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"

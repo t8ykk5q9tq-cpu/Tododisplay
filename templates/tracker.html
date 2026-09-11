@@ -77,6 +77,36 @@
             background: #0f3460; font-size: 1.5rem; cursor: pointer;
         }
         .mood-btn:active { background: #00d4ff; }
+        /* Water counter */
+        .water-row { display: flex; align-items: center; gap: 0.6rem; }
+        .water-btn {
+            flex: 0 0 auto; width: 3rem; height: 3rem; border: 2px solid #0f3460;
+            border-radius: 0.6rem; background: #0f3460; color: #eaeaea;
+            font-size: 1.6rem; cursor: pointer;
+        }
+        .water-btn:active { background: #00d4ff; }
+        .water-count { flex: 1; text-align: center; font-size: 1.3rem; }
+        .water-count .g { color: #00d4ff; font-weight: 600; }
+        .bar-track { height: 12px; border-radius: 6px; background: #0f3460; overflow: hidden; margin-top: 0.6rem; }
+        .bar-fill { height: 100%; background: #00d4ff; transition: width 0.3s; }
+        .bar-fill.full { background: #2ecc71; }
+        /* Metric input + sparkline */
+        .metric-form { display: flex; gap: 0.5rem; }
+        .metric-form input {
+            flex: 1; padding: 0.7rem; border: none; border-radius: 0.6rem;
+            background: #0f3460; color: #eaeaea; font-size: 1rem;
+        }
+        .metric-form button {
+            flex: 0 0 auto; padding: 0 1.1rem; border: none; border-radius: 0.6rem;
+            background: #00d4ff; color: #12122a; font-weight: 600; cursor: pointer;
+        }
+        .metric-latest { font-size: 1.4rem; margin-bottom: 0.4rem; }
+        .metric-latest .v { color: #00d4ff; font-weight: 600; }
+        .metric-latest .up { color: #e94560; }
+        .metric-latest .down { color: #2ecc71; }
+        .spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 0.5rem; }
+        .spark .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+        .spark .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
         /* App usage rows */
         .app-row { display: flex; justify-content: space-between; align-items: baseline;
             padding: 0.4rem 0; border-bottom: 1px solid #0f3460; }
@@ -126,6 +156,29 @@
         <div class="recent-title">Mood</div>
         <div class="mood-row" id="mood-row"></div>
         <div class="sum-total" id="mood-today"></div>
+    </div>
+
+    <!-- Water / hydration -->
+    <div class="card">
+        <div class="recent-title">Water</div>
+        <div class="water-row">
+            <button class="water-btn" id="water-minus">&minus;</button>
+            <div class="water-count"><span class="g" id="water-glasses">0</span>
+                <span id="water-goal"></span></div>
+            <button class="water-btn" id="water-plus">+</button>
+        </div>
+        <div class="bar-track"><div class="bar-fill" id="water-fill" style="width:0%"></div></div>
+    </div>
+
+    <!-- Daily metric (weight) -->
+    <div class="card">
+        <div class="recent-title" id="metric-title">Weight</div>
+        <div class="metric-latest" id="metric-latest"></div>
+        <form class="metric-form" id="metric-form">
+            <input type="number" step="0.1" id="metric-input" placeholder="Log today's number" inputmode="decimal">
+            <button type="submit">Save</button>
+        </form>
+        <div class="spark" id="metric-spark"></div>
     </div>
 
     <!-- Today's summary (time per category) -->
@@ -267,6 +320,47 @@
             const avg = moods.reduce((a, m) => a + m.value, 0) / moods.length;
             const last = moods[moods.length - 1].value;
             el.textContent = `Latest ${MOOD_EMOJI[last]}  •  Avg ${avg.toFixed(1)}/5  (${moods.length} today)`;
+        }
+
+        async function logWater(delta) {
+            const r = await fetch("/water?delta=" + delta);
+            renderWater(await r.json());
+        }
+
+        function renderWater(w) {
+            if (!w) return;
+            document.getElementById("water-glasses").textContent = w.glasses;
+            document.getElementById("water-goal").textContent = "/ " + w.goal + " glasses";
+            const fill = document.getElementById("water-fill");
+            fill.style.width = w.percent + "%";
+            fill.classList.toggle("full", w.glasses >= w.goal);
+        }
+
+        function renderMetric(m) {
+            if (!m) return;
+            document.getElementById("metric-title").textContent = m.label || "Metric";
+            const latest = document.getElementById("metric-latest");
+            if (m.latest == null) {
+                latest.innerHTML = '<span style="color:#8a8a9a">No entries yet</span>';
+            } else {
+                let chg = "";
+                if (m.change != null && m.change !== 0) {
+                    const cls = m.change > 0 ? "up" : "down";
+                    const arrow = m.change > 0 ? "\u2191" : "\u2193";
+                    chg = ` <span class="${cls}">${arrow}${Math.abs(m.change)}</span>`;
+                }
+                latest.innerHTML = `<span class="v">${m.latest}</span> ${m.unit || ""}${chg}`;
+            }
+            // sparkline over recent points
+            const spark = document.getElementById("metric-spark");
+            const pts = (m.points || []).slice(-14);
+            if (pts.length < 2) { spark.innerHTML = ""; return; }
+            const vals = pts.map(p => p.value);
+            const lo = Math.min(...vals), hi = Math.max(...vals), span = (hi - lo) || 1;
+            spark.innerHTML = pts.map(p => {
+                const h = 15 + Math.round(((p.value - lo) / span) * 85);
+                return `<div class="col"><div class="b" style="height:${h}%" title="${p.date}: ${p.value}"></div></div>`;
+            }).join("");
         }
 
         function renderFocus(fs) {
@@ -434,6 +528,11 @@
             renderAppToday(s.app_usage);
             renderAppWeek(s.app_week);
             renderSleep(s.sleep);
+            renderWater(s.water);
+            // Don't clobber the metric input while the user is typing in it.
+            if (document.activeElement !== document.getElementById("metric-input")) {
+                renderMetric(s.metric);
+            }
             updateCountdown();
         }
 
@@ -472,6 +571,19 @@
         document.getElementById("sleep-btn").addEventListener("click", async () => {
             await fetch("/sleep", { method: "POST" });
             refresh();
+        });
+
+        document.getElementById("water-plus").addEventListener("click", () => logWater(1));
+        document.getElementById("water-minus").addEventListener("click", () => logWater(-1));
+        document.getElementById("metric-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const inp = document.getElementById("metric-input");
+            const v = parseFloat(inp.value);
+            if (isNaN(v)) return;
+            const r = await fetch("/metric?value=" + v);
+            inp.value = "";
+            inp.blur();
+            renderMetric(await r.json());
         });
 
         refresh();

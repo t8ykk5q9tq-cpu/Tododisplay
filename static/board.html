@@ -61,6 +61,14 @@
         .bars .b { width: 100%; background: #00d4ff; border-radius: 3px 3px 0 0; min-height: 3px; }
         .bars .b.empty { background: #2a2f4a; }
         .bars .d { font-size: 0.65rem; color: #6a6a78; margin-top: 2px; }
+        .wbar-track { height: 16px; border-radius: 8px; background: #0f3460; overflow: hidden; margin-top: 6px; }
+        .wbar-fill { height: 100%; background: #00d4ff; transition: width 0.3s; }
+        .wbar-fill.full { background: #2ecc71; }
+        .big { font-size: 1.4rem; }
+        .big .v { color: #00d4ff; font-weight: 600; }
+        .spark2 { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 8px; }
+        .spark2 .col { flex: 1; display: flex; align-items: flex-end; height: 100%; }
+        .spark2 .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
     </style>
 </head>
 <body>
@@ -108,6 +116,14 @@
             <div class="panel" style="flex:0 0 auto">
                 <h2>Mood &amp; Check-ins</h2>
                 <div id="mood-comp"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Water</h2>
+                <div id="water"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2 id="metric-h">Weight</h2>
+                <div id="metric"></div>
             </div>
             <div class="panel" style="flex:1">
                 <h2>Mac - This Week</h2>
@@ -215,6 +231,42 @@
             }).join("");
         }
 
+        function renderWater(w) {
+            const el = $("water");
+            if (!w) { el.innerHTML = '<div class="empty">No data</div>'; return; }
+            const full = w.glasses >= w.goal;
+            el.innerHTML =
+                `<div class="stat-row"><span>Today</span>` +
+                `<span class="v">${w.glasses} / ${w.goal} glasses</span></div>` +
+                `<div class="wbar-track"><div class="wbar-fill ${full ? "full" : ""}" style="width:${w.percent}%"></div></div>` +
+                (full ? '<div class="sub good">Goal reached \u2713</div>' : "");
+        }
+
+        function renderMetric(m) {
+            $("metric-h").textContent = (m && m.label) || "Metric";
+            const el = $("metric");
+            if (!m || m.latest == null) { el.innerHTML = '<div class="empty">No entries yet</div>'; return; }
+            let chg = "";
+            if (m.change != null && m.change !== 0) {
+                const cls = m.change > 0 ? "warn" : "good";
+                const arrow = m.change > 0 ? "\u2191" : "\u2193";
+                chg = ` <span class="${cls}">${arrow}${Math.abs(m.change)}</span>`;
+            }
+            let html = `<div class="big"><span class="v">${m.latest}</span> ${m.unit || ""}${chg}</div>`;
+            const pts = (m.points || []).slice(-20);
+            if (pts.length >= 2) {
+                const vals = pts.map(p => p.value);
+                const lo = Math.min(...vals), hi = Math.max(...vals), span = (hi - lo) || 1;
+                const bars = pts.map(p => {
+                    const h = 15 + Math.round(((p.value - lo) / span) * 85);
+                    return `<div class="col"><div class="b" style="height:${h}%" title="${p.date}: ${p.value}"></div></div>`;
+                }).join("");
+                html += `<div class="spark2">${bars}</div>`;
+                html += `<div class="sub">range ${lo}\u2013${hi} ${m.unit || ""}</div>`;
+            }
+            el.innerHTML = html;
+        }
+
         function renderList(el, items) {
             el.innerHTML = items.length
                 ? items.map(i => `<li class="${i.done ? "done" : ""}">${i.done ? "\u2713 " : "\u2022 "}${i.text}</li>`).join("")
@@ -263,6 +315,8 @@
             renderFocusStats(d.focus_stats);
             renderSleep(d.sleep);
             renderMoodComp(d.mood, d.compliance);
+            renderWater(d.water);
+            renderMetric(d.metric);
             renderMacWeek(d.mac_week);
         }
 
