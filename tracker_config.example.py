@@ -49,6 +49,24 @@ DISTRACTION_APPS = ["TikTok", "YouTube"]
 # Hour (0-23) to send a Pushover recap of the day. Set to -1 to disable.
 DAILY_SUMMARY_HOUR = 21
 
+# --- Weekly review push (7-day recap) ---
+# WEEKLY_REVIEW_DOW: weekday to send (0=Mon .. 6=Sun). WEEKLY_REVIEW_HOUR: hour.
+# Set WEEKLY_REVIEW_HOUR = -1 to disable.
+WEEKLY_REVIEW_DOW = 6          # Sunday
+WEEKLY_REVIEW_HOUR = 19        # 7pm
+
+# --- Nightly backups (of JSON logs + lists.db into backups/) ---
+# Runs once a day at BACKUP_HOUR and keeps the last BACKUP_KEEP snapshots.
+# Set BACKUP_HOUR = -1 to disable.
+BACKUP_HOUR = 3                # 3am
+BACKUP_KEEP = 14               # keep two weeks of daily snapshots
+
+# --- Bedtime wind-down nudge ---
+# When it's within this many minutes before your average bedtime (learned from
+# logged sleep) and you're in a distraction app, get one "wind down" Pushover
+# per night. Set to 0 to disable. Needs at least 3 logged nights to activate.
+WINDDOWN_WINDOW_MIN = 30
+
 # --- Check-in compliance (nags you when you skip check-ins) ---
 COMPLIANCE_START_HOUR = 8      # start expecting check-ins at this hour
 COMPLIANCE_END_HOUR = 22       # stop expecting after this hour

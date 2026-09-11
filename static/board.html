@@ -19,16 +19,31 @@
         .bar .weather { font-size: 1.1rem; }
         .bar .focus { color: #00d4ff; font-weight: 600; }
         .bar .net { font-size: 0.85rem; }
-        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; gap: 12px; overflow: hidden; }
+        .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; gap: 12px; overflow: hidden; min-height: 0; }
         .panel {
             background: #16213e; border-radius: 14px; padding: 16px;
-            display: flex; flex-direction: column; overflow: hidden;
+            display: flex; flex-direction: column; overflow: hidden; min-height: 0;
         }
         .panel h2 { color: #00d4ff; font-size: 1.2rem; margin-bottom: 10px; flex-shrink: 0; }
-        .list { list-style: none; overflow-y: auto; flex: 1; }
+        .list { list-style: none; overflow-y: auto; flex: 1; min-height: 0; }
         .list li { padding: 6px 0; font-size: 1rem; }
         .list li.done { color: #8a8a9a; text-decoration: line-through; }
-        .col2 { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+        /* Columns that stack many panels scroll internally rather than clip. */
+        .col2 { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+        /* Thin scrollbars so they don't dominate the board. */
+        .col2::-webkit-scrollbar, .list::-webkit-scrollbar,
+        #mac-week::-webkit-scrollbar, #checkins::-webkit-scrollbar { width: 6px; }
+        .col2::-webkit-scrollbar-thumb, .list::-webkit-scrollbar-thumb,
+        #mac-week::-webkit-scrollbar-thumb, #checkins::-webkit-scrollbar-thumb {
+            background: #2a2f4a; border-radius: 3px;
+        }
+        /* Narrower screens: drop to 2 columns so panels stay readable. */
+        @media (max-width: 1100px) {
+            .grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 640px) {
+            .grid { grid-template-columns: 1fr; overflow-y: auto; }
+        }
         .habits { display: flex; flex-wrap: wrap; gap: 8px; }
         .habit { background: #0f3460; border-radius: 8px; padding: 6px 10px; font-size: 0.95rem; }
         .habit.done { color: #8a8a9a; text-decoration: line-through; }
@@ -69,6 +84,9 @@
         .spark2 { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 8px; }
         .spark2 .col { flex: 1; display: flex; align-items: flex-end; height: 100%; }
         .spark2 .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
+        .jentry { padding: 4px 0; border-top: 1px solid #22284a; font-size: 0.9rem; }
+        .jentry:first-child { border-top: none; }
+        .jentry .jd { color: #00d4ff; font-size: 0.75rem; margin-right: 6px; }
     </style>
 </head>
 <body>
@@ -124,6 +142,10 @@
             <div class="panel" style="flex:0 0 auto">
                 <h2 id="metric-h">Weight</h2>
                 <div id="metric"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
+                <h2>Journal</h2>
+                <div id="journal"></div>
             </div>
             <div class="panel" style="flex:1">
                 <h2>Mac - This Week</h2>
@@ -267,6 +289,22 @@
             el.innerHTML = html;
         }
 
+        function esc(s) {
+            const dv = document.createElement("div"); dv.textContent = s; return dv.innerHTML;
+        }
+        function fmtDay(dstr) {
+            const d = new Date(dstr + "T00:00:00");
+            return isNaN(d) ? dstr : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        }
+        function renderJournal(j) {
+            const el = $("journal");
+            const rows = (j && j.recent) || [];
+            if (rows.length === 0) { el.innerHTML = '<div class="empty">No entries yet</div>'; return; }
+            el.innerHTML = rows.map(e =>
+                `<div class="jentry"><span class="jd">${fmtDay(e.date)}</span>${esc(e.text)}</div>`
+            ).join("");
+        }
+
         function renderList(el, items) {
             el.innerHTML = items.length
                 ? items.map(i => `<li class="${i.done ? "done" : ""}">${i.done ? "\u2713 " : "\u2022 "}${i.text}</li>`).join("")
@@ -317,6 +355,7 @@
             renderMoodComp(d.mood, d.compliance);
             renderWater(d.water);
             renderMetric(d.metric);
+            renderJournal(d.journal);
             renderMacWeek(d.mac_week);
         }
 

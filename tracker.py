@@ -13,6 +13,7 @@ Copy tracker_config.example.py -> tracker_config.py and fill it in.
 import json
 import math
 import os
+import shutil
 import smtplib
 import sqlite3
 import time
@@ -50,8 +51,16 @@ MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")     # mood check-ins (1-5)
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water glasses per day
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")  # daily numeric metric (weight)
+JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")  # one line per day
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
+# ======================================================================
+# Configuration. Every value falls back to a sensible default, so
+# tracker_config.py is optional; set any of these there to override.
+# See tracker_config.example.py for the full list with descriptions.
+# ======================================================================
+
+# --- Check-ins ---
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
 FOLLOWUP = int(getattr(cfg, "FOLLOWUP_MIN", 5)) * 60
 # Hour (0-23) to send the evening reminder about unchecked habits. -1 disables.
@@ -78,6 +87,24 @@ DISTRACTION_APPS = set(getattr(cfg, "DISTRACTION_APPS",
 # Hour (0-23) to send the end-of-day summary push. -1 disables.
 DAILY_SUMMARY_HOUR = int(getattr(cfg, "DAILY_SUMMARY_HOUR", 21))
 
+# Weekly review push: a 7-day recap. WEEKLY_REVIEW_DOW is the weekday to send
+# (0=Mon .. 6=Sun; default 6=Sunday), WEEKLY_REVIEW_HOUR the hour. -1 disables.
+WEEKLY_REVIEW_DOW = int(getattr(cfg, "WEEKLY_REVIEW_DOW", 6))
+WEEKLY_REVIEW_HOUR = int(getattr(cfg, "WEEKLY_REVIEW_HOUR", 19))
+
+# Nightly backups: copy runtime data (JSON logs + lists.db) into a timestamped
+# folder under BACKUP_DIR once a day at BACKUP_HOUR. Keeps the last
+# BACKUP_KEEP snapshots. Set BACKUP_HOUR = -1 to disable.
+BACKUP_DIR = os.path.join(BASE_DIR, "backups")
+BACKUP_HOUR = int(getattr(cfg, "BACKUP_HOUR", 3))
+BACKUP_KEEP = int(getattr(cfg, "BACKUP_KEEP", 14))
+
+# Bedtime wind-down nudge: when it's within WINDDOWN_WINDOW_MIN before your
+# average bedtime (learned from sleep data) and you're in a distraction app,
+# send a "wind down" Pushover (once per night). Set WINDDOWN_WINDOW_MIN = 0
+# to disable. AVG bedtime needs at least a few logged nights to kick in.
+WINDDOWN_WINDOW_MIN = int(getattr(cfg, "WINDDOWN_WINDOW_MIN", 30))
+
 # Check-in compliance: the hours you're expected to be logging check-ins.
 # Expected count = elapsed check-in intervals within these hours so far today.
 COMPLIANCE_START_HOUR = int(getattr(cfg, "COMPLIANCE_START_HOUR", 8))
@@ -100,6 +127,12 @@ WATER_GOAL = int(getattr(cfg, "WATER_GOAL", 8))
 METRIC_LABEL = str(getattr(cfg, "METRIC_LABEL", "Weight"))
 METRIC_UNIT = str(getattr(cfg, "METRIC_UNIT", "lb"))
 
+# The Pi's reachable tracker URL, so Pushover reminders can deep-link to the
+# check-in page. Defaults to the Pi 5's Tailscale address; override in config.
+PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "http://100.102.96.42:5050")
+
+# --- end configuration ---
+
 
 def classify_app(name):
     """Return 'focus', 'distraction', or 'neutral' for an app/category name."""
@@ -110,10 +143,7 @@ def classify_app(name):
     if name.startswith("Mac:"):
         return "focus"
     return "neutral"
-# The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
-# to the check-in page. Defaults to the Pi 5's Tailscale address; override in
-# tracker_config.py with PI_BASE_URL if it changes.
-PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "http://100.102.96.42:5050")
+
 
 app = Flask(__name__)
 
@@ -752,6 +782,47 @@ def log_metric():
     return jsonify(metric_recent())
 
 
+def load_journal():
+    """Return {'YYYY-MM-DD': 'text'} of one-line-a-day entries."""
+    if os.path.exists(JOURNAL_FILE):
+        try:
+            with open(JOURNAL_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def journal_recent(days=7):
+    """Return {'today': text, 'recent': [{date, text}], } newest-first recent."""
+    data = load_journal()
+    today = date.today().isoformat()
+    ordered = sorted(data.items(), reverse=True)[:days]
+    return {"today": data.get(today, ""),
+            "recent": [{"date": d, "text": tx} for d, tx in ordered]}
+
+
+@app.route("/journal", methods=["GET", "POST"])
+def journal():
+    """GET returns today's line + recent entries. POST/GET with ?text= saves
+    (replaces) today's line."""
+    if request.method == "POST":
+        text = (request.get_json(silent=True) or {}).get("text")
+    else:
+        text = request.args.get("text")
+    if text is not None:
+        text = str(text).strip()[:280]
+        data = load_journal()
+        today = date.today().isoformat()
+        if text:
+            data[today] = text
+        else:
+            data.pop(today, None)  # empty text clears today's entry
+        with open(JOURNAL_FILE, "w") as f:
+            json.dump(data, f)
+    return jsonify(journal_recent())
+
+
 def load_sleep():
     if os.path.exists(SLEEP_FILE):
         try:
@@ -996,6 +1067,204 @@ def daily_summary_push_thread():
         time.sleep(60)
 
 
+def build_weekly_review():
+    """Compose a 7-day recap: focus/distraction, sleep, habits, check-ins,
+    mood, water goal hit-rate, and weight change."""
+    today = date.today()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    day_set = set(days)
+    lines = ["Weekly review"]
+
+    # Focus vs distraction over the week.
+    au = load_appuse()
+    totals_by_day = au.get("totals", {})
+    focus_sec = distraction_sec = 0
+    for d in days:
+        for a, s in totals_by_day.get(d, {}).items():
+            kind = classify_app(a)
+            if kind == "focus":
+                focus_sec += s
+            elif kind == "distraction":
+                distraction_sec += s
+    if focus_sec or distraction_sec:
+        lines.append(f"Focus {_fmt_dur(focus_sec)} / "
+                     f"Distraction {_fmt_dur(distraction_sec)}")
+
+    # Sleep: average duration + bedtime regularity from the weekly summary.
+    sl = sleep_summary_week()
+    if sl.get("nights"):
+        avg_dur = sl.get("avg_duration_min")
+        if avg_dur:
+            h, m = divmod(avg_dur, 60)
+            reg = sl.get("bedtime_regularity_min")
+            reg_txt = f", bedtime +/-{reg}m" if reg is not None else ""
+            lines.append(f"Sleep avg {h}h {m}m/night{reg_txt} "
+                         f"({len(sl['nights'])} nights)")
+
+    # Habits: completions vs opportunities across the week.
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        habit_count = conn.execute("SELECT COUNT(*) c FROM habits").fetchone()["c"]
+        done = 0
+        for r in conn.execute("SELECT day FROM habit_log").fetchall():
+            if r["day"] in day_set:
+                done += 1
+        conn.close()
+        opportunities = habit_count * 7
+        if opportunities:
+            pct = int(round((done / opportunities) * 100))
+            lines.append(f"Habits {done}/{opportunities} ({pct}%)")
+    except sqlite3.Error:
+        pass
+
+    # Check-ins logged this week.
+    checkins = sum(1 for e in load_log()
+                   if str(e.get("timestamp", ""))[:10] in day_set)
+    if checkins:
+        lines.append(f"{checkins} check-ins")
+
+    # Average mood across the week.
+    week_moods = [m["value"] for m in load_moods()
+                  if str(m.get("timestamp", ""))[:10] in day_set]
+    if week_moods:
+        lines.append(f"Mood avg {sum(week_moods) / len(week_moods):.1f}/5")
+
+    # Water: days the goal was met.
+    water = load_water()
+    hit = sum(1 for d in days if int(water.get(d, 0)) >= WATER_GOAL)
+    logged = sum(1 for d in days if int(water.get(d, 0)) > 0)
+    if logged:
+        lines.append(f"Water goal hit {hit}/7 days")
+
+    # Weight change over the week (first vs last entry within the window).
+    m = metric_recent(days=30)
+    wk_points = [p for p in m.get("points", []) if p["date"] in day_set]
+    if len(wk_points) >= 2:
+        change = round(wk_points[-1]["value"] - wk_points[0]["value"], 2)
+        arrow = "+" if change > 0 else ""
+        lines.append(f"{m['label']} {arrow}{change}{m['unit']} this week")
+
+    if len(lines) == 1:
+        return "Weekly review: not much tracked this week."
+    return "\n".join(lines)
+
+
+def weekly_review_push_thread():
+    """Send the weekly review once, on WEEKLY_REVIEW_DOW at WEEKLY_REVIEW_HOUR."""
+    if WEEKLY_REVIEW_HOUR < 0:
+        return
+    last_sent = None
+    while True:
+        now = datetime.now()
+        stamp = now.date().isoformat()
+        if (now.weekday() == WEEKLY_REVIEW_DOW
+                and now.hour == WEEKLY_REVIEW_HOUR
+                and last_sent != stamp):
+            last_sent = stamp
+            send_pushover(build_weekly_review(), title="Weekly review")
+        time.sleep(60)
+
+
+# Files worth backing up: all runtime logs/state plus the lists database.
+BACKUP_FILES = [
+    LOG_FILE, STATE_FILE, APPUSE_FILE, MOOD_FILE, SLEEP_FILE,
+    WATER_FILE, METRIC_FILE, COMPLIANCE_FILE, DB_PATH,
+]
+
+
+def run_backup():
+    """Copy existing data files into backups/<YYYY-MM-DD_HHMMSS>/ and prune to
+    the most recent BACKUP_KEEP snapshots. Returns the snapshot path."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    dest = os.path.join(BACKUP_DIR, stamp)
+    os.makedirs(dest, exist_ok=True)
+    copied = 0
+    for path in BACKUP_FILES:
+        if os.path.exists(path):
+            try:
+                shutil.copy2(path, os.path.join(dest, os.path.basename(path)))
+                copied += 1
+            except OSError:
+                pass
+    # If nothing was copied, don't leave an empty snapshot behind.
+    if copied == 0:
+        try:
+            os.rmdir(dest)
+        except OSError:
+            pass
+        return None
+    # Prune old snapshots (keep the newest BACKUP_KEEP).
+    try:
+        snaps = sorted(d for d in os.listdir(BACKUP_DIR)
+                       if os.path.isdir(os.path.join(BACKUP_DIR, d)))
+        for old in snaps[:-BACKUP_KEEP] if BACKUP_KEEP > 0 else []:
+            shutil.rmtree(os.path.join(BACKUP_DIR, old), ignore_errors=True)
+    except OSError:
+        pass
+    return dest
+
+
+def backup_thread():
+    """Run a backup once a day at BACKUP_HOUR."""
+    if BACKUP_HOUR < 0:
+        return
+    last_done = None
+    while True:
+        now = datetime.now()
+        today = now.date().isoformat()
+        if now.hour == BACKUP_HOUR and last_done != today:
+            last_done = today
+            run_backup()
+        time.sleep(60)
+
+
+def _mins_before(target_min, now_min):
+    """Minutes from now_min until target_min on a 24h circle (0..1439).
+    e.g. now 22:40, target 23:00 -> 20; now 23:10, target 23:00 -> 1430."""
+    return (target_min - now_min) % 1440
+
+
+def winddown_nudge_thread():
+    """When it's within WINDDOWN_WINDOW_MIN before your average bedtime and a
+    distraction app is currently open, send one 'wind down' nudge per night."""
+    if WINDDOWN_WINDOW_MIN <= 0:
+        return
+    last_nudge_date = None
+    while True:
+        try:
+            sleep = sleep_summary_week()
+            avg_bed = sleep.get("avg_bedtime_min")
+            # Need enough history for a meaningful average.
+            if avg_bed is not None and len(sleep.get("nights", [])) >= 3:
+                now = datetime.now()
+                now_min = now.hour * 60 + now.minute
+                # How long until average bedtime (wrapping midnight).
+                until_bed = _mins_before(avg_bed, now_min)
+                # Fire in the window just before bedtime (and a little after).
+                in_window = (until_bed <= WINDDOWN_WINDOW_MIN
+                             or until_bed >= 1440 - 15)
+                # "Tonight" key rolls at noon so a post-midnight bedtime still
+                # counts as the same night.
+                night_key = ((now - timedelta(hours=12)).date().isoformat())
+                if in_window and last_nudge_date != night_key:
+                    data = load_appuse()
+                    open_distraction = [a for a in data.get("open", {})
+                                        if classify_app(a) == "distraction"]
+                    if open_distraction:
+                        app = open_distraction[0]
+                        bstr = f"{(avg_bed // 60) % 24:02d}:{avg_bed % 60:02d}"
+                        send_pushover(
+                            f"It's near your usual bedtime ({bstr}) and you're "
+                            f"in {app}. Time to wind down for sleep.",
+                            title="Wind down", priority=1)
+                        last_nudge_date = night_key
+        except Exception:
+            pass
+        time.sleep(60)
+
+
 def minutes_since_last_checkin():
     """Minutes since your most recent check-in today (None if none today)."""
     today = date.today().isoformat()
@@ -1208,6 +1477,7 @@ def status():
         "sleep": sleep_summary_week(),
         "water": water_today(),
         "metric": metric_recent(),
+        "journal": journal_recent(),
     })
 
 
@@ -1267,6 +1537,21 @@ def daily_summary_test():
     return jsonify({"sent": True, "summary": text})
 
 
+@app.route("/weekly-review-test", methods=["GET", "POST"])
+def weekly_review_test():
+    """Send the weekly review right now, for testing."""
+    text = build_weekly_review()
+    send_pushover(text, title="Weekly review")
+    return jsonify({"sent": True, "review": text})
+
+
+@app.route("/backup-now", methods=["GET", "POST"])
+def backup_now():
+    """Run a backup immediately, for testing/manual snapshots."""
+    dest = run_backup()
+    return jsonify({"ok": bool(dest), "snapshot": os.path.basename(dest) if dest else None})
+
+
 # ---------- main ----------
 
 if __name__ == "__main__":
@@ -1275,6 +1560,9 @@ if __name__ == "__main__":
     Thread(target=midnight_email_thread, daemon=True).start()
     Thread(target=habit_reminder_thread, daemon=True).start()
     Thread(target=daily_summary_push_thread, daemon=True).start()
+    Thread(target=weekly_review_push_thread, daemon=True).start()
+    Thread(target=backup_thread, daemon=True).start()
+    Thread(target=winddown_nudge_thread, daemon=True).start()
     Thread(target=compliance_nag_thread, daemon=True).start()
     Thread(target=app_open_nudge_thread, daemon=True).start()
     print("Time Tracker running on http://0.0.0.0:5050")

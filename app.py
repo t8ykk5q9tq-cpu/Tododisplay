@@ -348,6 +348,7 @@ MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
+JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")
 WATER_GOAL = int(os.environ.get("WATER_GOAL", "8"))
 METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
 METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
@@ -499,6 +500,14 @@ def _board_water(today):
     return {"glasses": glasses, "goal": WATER_GOAL, "percent": pct}
 
 
+def _board_journal():
+    data = _read_json(JOURNAL_FILE, {})
+    today = date.today().isoformat()
+    ordered = sorted(data.items(), reverse=True)[:5]
+    return {"today": data.get(today, ""),
+            "recent": [{"date": d, "text": tx} for d, tx in ordered]}
+
+
 def _board_metric():
     entries = _read_json(METRIC_FILE, [])
     by_day = {}
@@ -617,6 +626,7 @@ def api_board():
         "sleep": _board_sleep(),
         "water": _board_water(today),
         "metric": _board_metric(),
+        "journal": _board_journal(),
     })
 
 

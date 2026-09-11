@@ -25,5 +25,9 @@ mood_log.json
 sleep_log.json
 water_log.json
 metric_log.json
+journal_log.json
 compliance.json
 pushover_count.json
+
+# Nightly backups of runtime data
+backups/

@@ -107,6 +107,19 @@
         .spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 0.5rem; }
         .spark .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
         .spark .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
+        /* Journal */
+        .journal-form { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; }
+        .journal-form input {
+            flex: 1; padding: 0.7rem; border: none; border-radius: 0.6rem;
+            background: #0f3460; color: #eaeaea; font-size: 1rem;
+        }
+        .journal-form button {
+            flex: 0 0 auto; padding: 0 1.1rem; border: none; border-radius: 0.6rem;
+            background: #00d4ff; color: #12122a; font-weight: 600; cursor: pointer;
+        }
+        .journal-entry { padding: 5px 0; border-top: 1px solid #22284a; font-size: 0.92rem; }
+        .journal-entry:first-child { border-top: none; }
+        .journal-entry .jd { color: #00d4ff; font-size: 0.78rem; margin-right: 6px; }
         /* App usage rows */
         .app-row { display: flex; justify-content: space-between; align-items: baseline;
             padding: 0.4rem 0; border-bottom: 1px solid #0f3460; }
@@ -179,6 +192,16 @@
             <button type="submit">Save</button>
         </form>
         <div class="spark" id="metric-spark"></div>
+    </div>
+
+    <!-- Journal: one line a day -->
+    <div class="card">
+        <div class="recent-title">Journal - one line a day</div>
+        <form class="journal-form" id="journal-form">
+            <input type="text" id="journal-input" maxlength="280" placeholder="How was today, in one line?" autocomplete="off">
+            <button type="submit">Save</button>
+        </form>
+        <div id="journal-recent"></div>
     </div>
 
     <!-- Today's summary (time per category) -->
@@ -363,6 +386,27 @@
             }).join("");
         }
 
+        function esc(s) {
+            const d = document.createElement("div"); d.textContent = s; return d.innerHTML;
+        }
+
+        function fmtDay(dstr) {
+            const d = new Date(dstr + "T00:00:00");
+            if (isNaN(d)) return dstr;
+            return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        }
+
+        function renderJournal(j) {
+            if (!j) return;
+            const input = document.getElementById("journal-input");
+            if (document.activeElement !== input) input.value = j.today || "";
+            const el = document.getElementById("journal-recent");
+            const rows = (j.recent || []);
+            el.innerHTML = rows.length
+                ? rows.map(e => `<div class="journal-entry"><span class="jd">${fmtDay(e.date)}</span>${esc(e.text)}</div>`).join("")
+                : '<div class="journal-entry" style="color:#8a8a9a">No entries yet</div>';
+        }
+
         function renderFocus(fs) {
             const el = document.getElementById("focus-ratio");
             if (!fs || (!fs.focus_sec && !fs.distraction_sec)) {
@@ -533,6 +577,7 @@
             if (document.activeElement !== document.getElementById("metric-input")) {
                 renderMetric(s.metric);
             }
+            renderJournal(s.journal);
             updateCountdown();
         }
 
@@ -575,6 +620,13 @@
 
         document.getElementById("water-plus").addEventListener("click", () => logWater(1));
         document.getElementById("water-minus").addEventListener("click", () => logWater(-1));
+        document.getElementById("journal-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const inp = document.getElementById("journal-input");
+            const r = await fetch("/journal?text=" + encodeURIComponent(inp.value.trim()));
+            inp.blur();
+            renderJournal(await r.json());
+        });
         document.getElementById("metric-form").addEventListener("submit", async (e) => {
             e.preventDefault();
             const inp = document.getElementById("metric-input");
