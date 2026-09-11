@@ -27,3 +27,12 @@ FOLLOWUP_MIN = 5            # follow-up reminder if you haven't responded
 # Hour (0-23) to send an evening Pushover about habits not yet checked today.
 # Set to -1 to disable. Example: 20 = 8pm.
 HABIT_REMINDER_HOUR = 20
+
+# --- Check-in categories (quick-pick buttons + tags + daily summary) ---
+CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health", "Personal"]
+
+# --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
+# Set to the tracker's reachable address, e.g. your Tailscale URL:
+#   PI_BASE_URL = "http://100.102.96.42:5050"
+# Leave blank to omit the link.
+PI_BASE_URL = ""

@@ -37,6 +37,8 @@ except ImportError:
         CHECKIN_INTERVAL_MIN = 30
         FOLLOWUP_MIN = 5
         HABIT_REMINDER_HOUR = 20  # 8pm
+        CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health", "Personal"]
+        PI_BASE_URL = ""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tracker_log.json")
@@ -47,19 +49,30 @@ INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
 FOLLOWUP = int(getattr(cfg, "FOLLOWUP_MIN", 5)) * 60
 # Hour (0-23) to send the evening reminder about unchecked habits. -1 disables.
 HABIT_REMINDER_HOUR = int(getattr(cfg, "HABIT_REMINDER_HOUR", 20))
+# Quick-pick categories for check-ins (buttons + tags + daily summary).
+CATEGORIES = list(getattr(cfg, "CATEGORIES",
+                          ["Work", "Break", "Meal", "Errands", "Health", "Personal"]))
+# The Pi's reachable tracker URL (e.g. "http://100.102.96.42:5050"), used so
+# Pushover notification buttons can log a check-in directly. Blank = disabled.
+PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "")
 
 app = Flask(__name__)
 
 
 # ---------- helpers ----------
 
-def send_pushover(message, title="Time Tracker"):
+def send_pushover(message, title="Time Tracker", url=None, url_title=None):
     if not cfg.PUSHOVER_USER or not cfg.PUSHOVER_TOKEN:
         return  # notifications disabled
-    data = urllib.parse.urlencode({
+    payload = {
         "token": cfg.PUSHOVER_TOKEN, "user": cfg.PUSHOVER_USER,
         "title": title, "message": message, "sound": "vibrate",
-    }).encode()
+    }
+    if url:
+        payload["url"] = url
+        if url_title:
+            payload["url_title"] = url_title
+    data = urllib.parse.urlencode(payload).encode()
     try:
         urllib.request.urlopen(
             urllib.request.Request("https://api.pushover.net/1/messages.json", data=data),
@@ -105,9 +118,11 @@ def persist_runtime_state():
     save_state({"is_awake": is_awake, "next_checkin_time": next_checkin_time})
 
 
-def log_entry(text, extra=None):
+def log_entry(text, extra=None, category=None):
     entries = load_log()
     e = {"timestamp": datetime.now().isoformat(), "text": text}
+    if category:
+        e["category"] = category
     if extra:
         e.update(extra)
     entries.append(e)
@@ -145,8 +160,12 @@ def timer_thread():
         if not is_awake:
             continue
         notification_pending.set()
+        # Include a tappable link so you can jump straight to logging. If a
+        # base URL is configured, deep-link to the page; otherwise no URL.
+        cin_url = (PI_BASE_URL.rstrip("/") + "/") if PI_BASE_URL else None
         send_pushover("Check-in time! What have you been up to the last "
-                      f"{INTERVAL // 60} minutes?")
+                      f"{INTERVAL // 60} minutes?",
+                      url=cin_url, url_title="Log a check-in")
         next_checkin_time = time.time() + INTERVAL
         persist_runtime_state()
         for _ in range(FOLLOWUP):
@@ -255,26 +274,73 @@ def get_log():
 def add_entry():
     data = request.json or {}
     text = data.get("text", "").strip()
+    category = (data.get("category") or "").strip() or None
+    # A quick-pick with no free-text uses the category name as the text.
+    if not text and category:
+        text = category
     if not text:
         return jsonify({"error": "text required"}), 400
-    log_entry(text)
+    log_entry(text, category=category)
     notification_pending.clear()
     return jsonify({"status": "ok"})
+
+
+@app.route("/quicklog")
+def quick_log():
+    """GET endpoint so Pushover notification links / quick bookmarks can log a
+    check-in in one tap: /quicklog?category=Work  (text defaults to category)."""
+    category = (request.args.get("category") or "").strip() or None
+    text = (request.args.get("text") or "").strip() or category
+    if not text:
+        return "Nothing logged (no text/category).", 400
+    log_entry(text, category=category)
+    notification_pending.clear()
+    # Return a tiny friendly page since this opens in a browser.
+    return (f"<html><body style='font-family:sans-serif;background:#1a1a2e;"
+            f"color:#eaeaea;text-align:center;padding-top:3rem'>"
+            f"<h2 style='color:#00d4ff'>Logged: {text}</h2>"
+            f"<p>You can close this.</p></body></html>")
+
+
+@app.route("/categories")
+def categories():
+    return jsonify({"categories": CATEGORIES})
+
+
+def _today_entries():
+    today = date.today().isoformat()
+    return [e for e in load_log()
+            if str(e.get("timestamp", "")).startswith(today)]
+
+
+def daily_summary(entries):
+    """Estimate time per category today. Each check-in represents roughly one
+    INTERVAL of activity, so time = count * interval_minutes."""
+    per_min = INTERVAL // 60
+    counts = {}
+    for e in entries:
+        cat = e.get("category") or "Other"
+        counts[cat] = counts.get(cat, 0) + 1
+    # Sorted by most time first.
+    summary = [
+        {"category": c, "count": n, "minutes": n * per_min}
+        for c, n in sorted(counts.items(), key=lambda kv: -kv[1])
+    ]
+    return summary
 
 
 @app.route("/status")
 def status():
     remaining = max(0, next_checkin_time - time.time())
-    entries = load_log()
-    # Only return TODAY's check-ins so the phone page (and display) reset at midnight.
-    today = date.today().isoformat()
-    todays = [e for e in entries
-              if str(e.get("timestamp", "")).startswith(today)]
+    todays = _today_entries()
     return jsonify({
         "notification_pending": notification_pending.is_set(),
         "next_checkin_in": int(remaining),
         "is_awake": is_awake,
         "recent": todays[-5:],
+        "categories": CATEGORIES,
+        "summary": daily_summary(todays),
+        "total_checkins": len(todays),
     })
 
 

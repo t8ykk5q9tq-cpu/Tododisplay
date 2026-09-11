@@ -22,6 +22,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lists.db")
 TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
+# Minutes per check-in, used to estimate time-per-category in the summary.
+# Should match tracker.py's CHECKIN_INTERVAL_MIN.
+TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
 
 # --- Weather (Open-Meteo: free, no API key needed) ---
 # Set your location via env vars; defaults below can be edited.
@@ -379,6 +382,8 @@ def read_tracker():
     if not os.path.exists(TRACKER_LOG) and not os.path.exists(TRACKER_STATE):
         return None
     recent = []
+    summary = []
+    total_today = 0
     try:
         with open(TRACKER_LOG) as f:
             entries = json.load(f)
@@ -387,6 +392,17 @@ def read_tracker():
         todays = [e for e in entries
                   if str(e.get("timestamp", "")).startswith(today)]
         recent = todays[-8:]
+        total_today = len(todays)
+        # Per-category summary: estimate time = count * check-in interval.
+        per_min = TRACKER_INTERVAL_MIN
+        counts = {}
+        for e in todays:
+            cat = e.get("category") or "Other"
+            counts[cat] = counts.get(cat, 0) + 1
+        summary = sorted(
+            ({"category": c, "minutes": n * per_min} for c, n in counts.items()),
+            key=lambda s: -s["minutes"],
+        )
     except (OSError, json.JSONDecodeError):
         pass
 
@@ -402,7 +418,8 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
-    return {"recent": recent, "next_in": next_in, "is_awake": is_awake}
+    return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
+            "summary": summary, "total_today": total_today}
 
 
 def last_update_str():
@@ -630,37 +647,60 @@ def draw_tracker(screen, fonts, rect, tracker):
         cd_surf = fonts["clock"].render(cd_text, True, cd_color)
         screen.blit(cd_surf, (x + w - pad - cd_surf.get_width(), y + pad))
 
-    # Recent check-ins below the header.
-    line_y = y + pad + title_surf.get_height() + 12
+    # Two columns below the header: recent check-ins (left) + today summary (right).
+    content_y = y + pad + title_surf.get_height() + 12
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
+    summary = tracker.get("summary") or []
+    # Right column reserved for the summary only if there is category data.
+    right_w = int(w * 0.38) if summary else 0
+    left_right = x + w - pad - right_w
+
     recent = tracker.get("recent") or []
+    line_y = content_y
     if not recent:
         empty = small_font.render("No check-ins yet", True, DONE_COLOR)
         screen.blit(empty, (x + pad, line_y))
-        return
+    else:
+        for e in reversed(recent):  # newest first
+            if line_y + line_h > bottom:
+                break
+            try:
+                t = datetime.fromisoformat(e["timestamp"]).strftime("%I:%M %p")
+            except (ValueError, KeyError):
+                t = ""
+            time_surf = small_font.render(t, True, HEADER_COLOR)
+            screen.blit(time_surf, (x + pad, line_y + 2))
+            time_w = time_surf.get_width() + 12
 
-    for e in reversed(recent):  # newest first
-        if line_y + line_h > bottom:
-            break
-        try:
-            t = datetime.fromisoformat(e["timestamp"]).strftime("%I:%M %p")
-        except (ValueError, KeyError):
-            t = ""
-        time_surf = small_font.render(t, True, HEADER_COLOR)
-        screen.blit(time_surf, (x + pad, line_y + 2))
-        time_w = time_surf.get_width() + 12
+            text = e.get("text", "")
+            max_w = left_right - (x + pad) - time_w - 12
+            rendered = item_font.render(text, True, TEXT_COLOR)
+            if rendered.get_width() > max_w:
+                while rendered.get_width() > max_w and len(text) > 3:
+                    text = text[:-2]
+                    rendered = item_font.render(text + "\u2026", True, TEXT_COLOR)
+            screen.blit(rendered, (x + pad + time_w, line_y))
+            line_y += line_h
 
-        text = e.get("text", "")
-        # Truncate to fit on one line.
-        max_w = w - 2 * pad - time_w
-        rendered = item_font.render(text, True, TEXT_COLOR)
-        if rendered.get_width() > max_w:
-            while rendered.get_width() > max_w and len(text) > 3:
-                text = text[:-2]
-                rendered = item_font.render(text + "\u2026", True, TEXT_COLOR)
-        screen.blit(rendered, (x + pad + time_w, line_y))
-        line_y += line_h
+    # Right column: today's per-category summary.
+    if summary:
+        sx = left_right + 12
+        sy = content_y
+        hdr = small_font.render("Today", True, DONE_COLOR)
+        screen.blit(hdr, (sx, sy))
+        sy += hdr.get_height() + 6
+        for s in summary:
+            if sy + line_h > bottom:
+                break
+            mins = s["minutes"]
+            hh, mm = divmod(mins, 60)
+            tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+            cat_surf = item_font.render(s["category"], True, TEXT_COLOR)
+            time_surf = item_font.render(tstr, True, HEADER_COLOR)
+            screen.blit(cat_surf, (sx, sy))
+            screen.blit(time_surf, (x + w - pad - time_surf.get_width(), sy))
+            sy += line_h
 
 
 def main():

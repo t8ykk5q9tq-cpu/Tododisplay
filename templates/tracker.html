@@ -52,6 +52,24 @@
         .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
         .awake { background: #4caf50; }
         .asleep { background: #8a8a9a; }
+        /* Quick-pick category buttons */
+        .quick-title { font-size: 0.85rem; color: #8a8a9a; margin-bottom: 0.6rem;
+            text-transform: uppercase; letter-spacing: 0.05em; }
+        .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+        .quick-grid button {
+            padding: 0.9rem 0.5rem; border: 2px solid #0f3460; border-radius: 0.6rem;
+            background: #0f3460; color: #eaeaea; font-size: 1rem; cursor: pointer;
+        }
+        .quick-grid button:active { background: #00d4ff; color: #1a1a2e; }
+        .recent-item .cat { display: inline-block; font-size: 0.7rem; color: #1a1a2e;
+            background: #00d4ff; border-radius: 0.3rem; padding: 1px 6px; margin-left: 6px; }
+        /* Today summary */
+        .sum-row { display: flex; justify-content: space-between; padding: 0.4rem 0;
+            border-bottom: 1px solid #0f3460; }
+        .sum-row:last-child { border-bottom: none; }
+        .sum-cat { color: #eaeaea; }
+        .sum-time { color: #00d4ff; }
+        .sum-total { color: #8a8a9a; font-size: 0.85rem; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
@@ -62,11 +80,24 @@
         <div class="label" id="cd-label">until next check-in</div>
     </div>
 
+    <!-- Quick-pick buttons: one tap logs that category -->
+    <div class="card">
+        <div class="quick-title">Quick check-in</div>
+        <div class="quick-grid" id="quick-grid"></div>
+    </div>
+
+    <!-- Free-text with optional category -->
     <div class="card">
         <form class="add-form" id="add-form">
-            <input type="text" id="entry" placeholder="What have you been up to?" autocomplete="off">
+            <input type="text" id="entry" placeholder="Something else..." autocomplete="off">
             <button type="submit">Log</button>
         </form>
+    </div>
+
+    <!-- Today's summary (time per category) -->
+    <div class="card">
+        <div class="recent-title">Today</div>
+        <div id="summary"></div>
     </div>
 
     <div class="card">
@@ -102,8 +133,49 @@
             el.innerHTML = recent.slice().reverse().map(e => {
                 const d = new Date(e.timestamp);
                 const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                return `<div class="recent-item"><span class="t">${t}</span><br><span class="x">${e.text}</span></div>`;
+                const cat = e.category ? `<span class="cat">${e.category}</span>` : "";
+                return `<div class="recent-item"><span class="t">${t}</span>${cat}<br><span class="x">${e.text}</span></div>`;
             }).join("");
+        }
+
+        function renderSummary(summary, total) {
+            const el = document.getElementById("summary");
+            if (!summary || summary.length === 0) {
+                el.innerHTML = '<div class="sum-row"><span class="sum-cat">Nothing logged yet</span></div>';
+                return;
+            }
+            const fmtMin = (m) => {
+                const h = Math.floor(m / 60), mm = m % 60;
+                return h ? `${h}h ${mm}m` : `${mm}m`;
+            };
+            el.innerHTML = summary.map(s =>
+                `<div class="sum-row"><span class="sum-cat">${s.category}</span>` +
+                `<span class="sum-time">${fmtMin(s.minutes)}</span></div>`
+            ).join("") + `<div class="sum-total">${total} check-in(s) today</div>`;
+        }
+
+        let quickBuilt = false;
+        function buildQuickButtons(categories) {
+            if (quickBuilt || !categories) return;
+            const grid = document.getElementById("quick-grid");
+            grid.innerHTML = "";
+            categories.forEach(cat => {
+                const b = document.createElement("button");
+                b.textContent = cat;
+                b.addEventListener("click", () => logCheckin(cat, cat));
+                grid.appendChild(b);
+            });
+            quickBuilt = true;
+        }
+
+        async function logCheckin(text, category) {
+            await fetch("/log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text, category: category || null })
+            });
+            pending = false;
+            refresh();
         }
 
         let remaining = 0;
@@ -114,7 +186,9 @@
             if (!s) return;
             remaining = s.next_checkin_in;
             pending = s.notification_pending;
+            buildQuickButtons(s.categories);
             renderRecent(s.recent);
+            renderSummary(s.summary, s.total_checkins);
             updateCountdown();
         }
 
@@ -125,7 +199,7 @@
             if (pending) {
                 cd.classList.add("pending");
                 timeEl.textContent = "Check in!";
-                labelEl.textContent = "tap the box above";
+                labelEl.textContent = "tap a quick button";
             } else {
                 cd.classList.remove("pending");
                 timeEl.textContent = fmt(Math.max(0, remaining));
@@ -142,14 +216,8 @@
             const input = document.getElementById("entry");
             const text = input.value.trim();
             if (!text) return;
-            await fetch("/log", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text })
-            });
+            await logCheckin(text, null);
             input.value = "";
-            pending = false;
-            refresh();
         });
 
         document.getElementById("wake-btn").addEventListener("click", async () => {
