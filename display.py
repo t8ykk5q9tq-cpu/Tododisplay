@@ -706,8 +706,9 @@ def main():
         "item": make_font(int(os.environ.get("ITEM_PT", max(18, min(sw, sh) // 19)))),
         "clock": make_font(int(os.environ.get("CLOCK_PT", max(14, min(sw, sh) // 27)))),
         "tiny": make_font(max(12, min(sw, sh) // 40)),
-        # Half-size title for the list panel headers (Todo / Shopping).
-        "panel_title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12)) / 2), bold=True),
+        # List panel headers (Todo / Shopping): 0.6x the full title size
+        # (half size, then +20%).
+        "panel_title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12)) * 0.6), bold=True),
     }
 
     clock = pygame.time.Clock()
