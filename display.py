@@ -203,6 +203,29 @@ def is_online():
     with _net_lock:
         return _net["online"]
 
+
+def ram_usage_str():
+    """Return a short RAM usage string like 'RAM 38%  (1.5/8.0 GB)' from
+    /proc/meminfo. Returns '' if unavailable (e.g. not on Linux)."""
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    info[parts[0].strip()] = int(parts[1].strip().split()[0])  # kB
+        total = info.get("MemTotal", 0)
+        avail = info.get("MemAvailable", info.get("MemFree", 0))
+        if total <= 0:
+            return ""
+        used = total - avail
+        pct = round(used / total * 100)
+        used_gb = used / (1024 * 1024)
+        total_gb = total / (1024 * 1024)
+        return f"RAM {pct}%  ({used_gb:.1f}/{total_gb:.1f} GB)"
+    except (OSError, ValueError):
+        return ""
+
 # --- Appearance ---
 BG_COLOR = (26, 26, 46)        # dark navy
 PANEL_COLOR = (22, 33, 62)     # slightly lighter panel
@@ -698,6 +721,7 @@ def main():
     habits_data = []
     focus_text = ""
     update_str = last_update_str()
+    ram_str = ram_usage_str()
 
     running = True
     while running:
@@ -718,6 +742,7 @@ def main():
             habits_data = read_habits()
             focus_text = read_focus()
             update_str = last_update_str()
+            ram_str = ram_usage_str()
             last_tick = now
             last_refresh = now
 
@@ -779,12 +804,17 @@ def main():
             pw_surf = fonts["tiny"].render("\u26a0 " + power_warn, True, WARN_COLOR)
             canvas.blit(pw_surf, (margin + 12, margin + 6))
 
-        # Connectivity indicator: text in the weather bar's top-right corner.
+        # Connectivity + RAM usage in the weather bar's top-right corner.
         online = is_online()
         net_txt = "Connected" if online else "Offline"
         net_color = HEADER_COLOR if online else WARN_COLOR
         net_surf = fonts["tiny"].render(net_txt, True, net_color)
         canvas.blit(net_surf, (sw - margin - net_surf.get_width() - 8, margin + 6))
+        if ram_str:
+            ram_surf = fonts["tiny"].render(ram_str, True, DONE_COLOR)
+            canvas.blit(ram_surf,
+                        (sw - margin - ram_surf.get_width() - 8,
+                         margin + 6 + tiny_h + 3))
 
         # Everything below the weather bar starts here.
         top = margin + weather_bar_h + gap
