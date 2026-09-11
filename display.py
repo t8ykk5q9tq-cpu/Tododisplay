@@ -8,6 +8,7 @@ No browser or desktop environment required. Add/remove items from any device via
 the Flask web interface at http://<pi-ip>:5000 -- changes appear here automatically.
 """
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -24,6 +25,7 @@ TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")
+SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
 COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
 COMPLIANCE_START_HOUR = int(os.environ.get("COMPLIANCE_START_HOUR", "8"))
 COMPLIANCE_END_HOUR = int(os.environ.get("COMPLIANCE_END_HOUR", "22"))
@@ -529,11 +531,53 @@ def read_tracker():
     except Exception:
         pass
 
+    # Sleep: last night's duration + average bedtime over the last 7 nights.
+    sleep = None
+    try:
+        with open(SLEEP_FILE) as f:
+            events = sorted(json.load(f), key=lambda e: e.get("timestamp", ""))
+        nights = []
+        pending = None
+        in_bed = False
+        for e in events:
+            try:
+                ts = datetime.fromisoformat(e["timestamp"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            if e.get("kind") == "sleep":
+                pending = ts
+                in_bed = True
+            elif e.get("kind") == "wake" and pending is not None:
+                dur = int((ts - pending).total_seconds() // 60)
+                if 0 < dur <= 20 * 60:
+                    nights.append({"bed_min": pending.hour * 60 + pending.minute,
+                                   "dur": dur})
+                pending = None
+                in_bed = False
+        recent_n = nights[-7:]
+        if recent_n:
+            # circular mean of bedtimes (handles times around midnight)
+            xs = ys = 0.0
+            for n in recent_n:
+                ang = (n["bed_min"] / 1440.0) * 2 * math.pi
+                xs += math.cos(ang)
+                ys += math.sin(ang)
+            ang = math.atan2(ys, xs)
+            if ang < 0:
+                ang += 2 * math.pi
+            avg_bed = int(round((ang / (2 * math.pi)) * 1440)) % 1440
+            sleep = {"last_dur_min": recent_n[-1]["dur"],
+                     "avg_bed_min": avg_bed, "in_bed": in_bed}
+        elif in_bed:
+            sleep = {"last_dur_min": None, "avg_bed_min": None, "in_bed": True}
+    except (OSError, json.JSONDecodeError):
+        pass
+
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
             "summary": summary, "app_opens": app_opens,
             "total_today": total_today,
             "focus_stats": focus_stats, "mac_week": mac_week,
-            "mood": mood, "compliance": compliance}
+            "mood": mood, "compliance": compliance, "sleep": sleep}
 
 
 def last_update_str():
@@ -845,6 +889,27 @@ def draw_tracker(screen, fonts, rect, tracker):
         # Draw just under the title line.
         screen.blit(c_surf, (x + pad, y + pad + title_surf.get_height() + 4))
 
+    # Sleep line: last night's duration + average bedtime (second sub-line).
+    sleep = tracker.get("sleep")
+    comp_has_line = bool(comp and comp["expected"] > 0)
+    if sleep:
+        sub = fonts["tiny"].get_height() + 6
+        sleep_y = y + pad + title_surf.get_height() + 4 + (sub if comp_has_line else 0)
+        if sleep.get("in_bed") and sleep.get("last_dur_min") is None:
+            stext = "Sleep: in bed now"
+            scolor = DONE_COLOR
+        else:
+            dur = sleep.get("last_dur_min")
+            hh, mm = divmod(dur, 60) if dur is not None else (0, 0)
+            dstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+            bm = sleep.get("avg_bed_min")
+            bstr = f"{(bm // 60) % 24:02d}:{bm % 60:02d}" if bm is not None else "--"
+            inbed = "  (in bed)" if sleep.get("in_bed") else ""
+            stext = f"Sleep: last {dstr}, avg bed {bstr}{inbed}"
+            scolor = HEADER_COLOR
+        s_surf = fonts["tiny"].render(stext, True, scolor)
+        screen.blit(s_surf, (x + pad, sleep_y))
+
     next_in = tracker.get("next_in")
     awake = tracker.get("is_awake", True)
     if not awake:
@@ -864,8 +929,10 @@ def draw_tracker(screen, fonts, rect, tracker):
     # Two columns below the header: recent check-ins (left) + today summary (right).
     # Leave extra room if the compliance line was drawn under the title.
     comp = tracker.get("compliance")
-    comp_offset = (fonts["tiny"].get_height() + 6) if (comp and comp["expected"] > 0) else 0
-    content_y = y + pad + title_surf.get_height() + 12 + comp_offset
+    sub_h = fonts["tiny"].get_height() + 6
+    comp_offset = sub_h if (comp and comp["expected"] > 0) else 0
+    sleep_offset = sub_h if tracker.get("sleep") else 0
+    content_y = y + pad + title_surf.get_height() + 12 + comp_offset + sleep_offset
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
     summary = tracker.get("summary") or []

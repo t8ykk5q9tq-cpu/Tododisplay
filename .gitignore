@@ -22,5 +22,6 @@ tracker_state.json
 tracker.log
 app_usage.json
 mood_log.json
+sleep_log.json
 compliance.json
 pushover_count.json

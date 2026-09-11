@@ -11,6 +11,7 @@ Secrets (Pushover keys, Gmail) live in tracker_config.py (gitignored).
 Copy tracker_config.example.py -> tracker_config.py and fill it in.
 """
 import json
+import math
 import os
 import smtplib
 import sqlite3
@@ -46,6 +47,7 @@ LOG_FILE = os.path.join(BASE_DIR, "tracker_log.json")
 STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")  # per-app session times
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")     # mood check-ins (1-5)
+SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
@@ -633,6 +635,116 @@ def log_mood():
     return jsonify({"status": "ok", "value": value})
 
 
+def load_sleep():
+    if os.path.exists(SLEEP_FILE):
+        try:
+            with open(SLEEP_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def record_sleep_event(kind):
+    """kind is 'sleep' or 'wake'. Append a timestamped event."""
+    events = load_sleep()
+    events.append({"timestamp": datetime.now().isoformat(), "kind": kind})
+    # keep it bounded (last ~90 days of events is plenty)
+    if len(events) > 2000:
+        events = events[-2000:]
+    with open(SLEEP_FILE, "w") as f:
+        json.dump(events, f)
+
+
+def _minutes_since_midnight(dt):
+    return dt.hour * 60 + dt.minute
+
+
+def _circular_mean_minutes(minute_values):
+    """Average clock times treating them as points on a 24h circle so that
+    bedtimes like 23:50 and 00:10 average to midnight, not noon."""
+    if not minute_values:
+        return None
+    xs = ys = 0.0
+    for m in minute_values:
+        ang = (m / 1440.0) * 2 * math.pi
+        xs += math.cos(ang)
+        ys += math.sin(ang)
+    ang = math.atan2(ys / len(minute_values), xs / len(minute_values))
+    if ang < 0:
+        ang += 2 * math.pi
+    return int(round((ang / (2 * math.pi)) * 1440)) % 1440
+
+
+def _circular_std_minutes(minute_values):
+    """Spread of clock times in minutes (circular stddev). Lower = more
+    regular. Returns None if fewer than 2 points."""
+    if len(minute_values) < 2:
+        return None
+    xs = ys = 0.0
+    for m in minute_values:
+        ang = (m / 1440.0) * 2 * math.pi
+        xs += math.cos(ang)
+        ys += math.sin(ang)
+    r = math.sqrt(xs * xs + ys * ys) / len(minute_values)
+    r = min(max(r, 1e-9), 1.0)
+    std_rad = math.sqrt(-2 * math.log(r))
+    return int(round((std_rad / (2 * math.pi)) * 1440))
+
+
+def _fmt_clock(minutes):
+    if minutes is None:
+        return "--"
+    h, m = divmod(minutes % 1440, 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def sleep_summary_week():
+    """Pair each 'sleep' with the next 'wake' into nights, over the last 7
+    completed nights. Returns per-night rows + regularity stats.
+
+    A night is attributed to the date the person WOKE UP on.
+    """
+    events = sorted(load_sleep(), key=lambda e: e.get("timestamp", ""))
+    nights = []
+    pending_sleep = None
+    for e in events:
+        try:
+            ts = datetime.fromisoformat(e["timestamp"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if e.get("kind") == "sleep":
+            pending_sleep = ts
+        elif e.get("kind") == "wake" and pending_sleep is not None:
+            dur_min = int((ts - pending_sleep).total_seconds() // 60)
+            # ignore nonsense (negative or > 20h) pairings
+            if 0 < dur_min <= 20 * 60:
+                nights.append({
+                    "date": ts.date().isoformat(),
+                    "bedtime": pending_sleep.isoformat(),
+                    "waketime": ts.isoformat(),
+                    "bed_min": _minutes_since_midnight(pending_sleep),
+                    "wake_min": _minutes_since_midnight(ts),
+                    "duration_min": dur_min,
+                })
+            pending_sleep = None
+    # last 7 nights
+    recent = nights[-7:]
+    bed_mins = [n["bed_min"] for n in recent]
+    wake_mins = [n["wake_min"] for n in recent]
+    durs = [n["duration_min"] for n in recent]
+    return {
+        "nights": recent,
+        "avg_bedtime_min": _circular_mean_minutes(bed_mins),
+        "avg_waketime_min": _circular_mean_minutes(wake_mins),
+        "bedtime_regularity_min": _circular_std_minutes(bed_mins),
+        "waketime_regularity_min": _circular_std_minutes(wake_mins),
+        "avg_duration_min": int(sum(durs) / len(durs)) if durs else None,
+        "last_duration_min": recent[-1]["duration_min"] if recent else None,
+        "in_bed": bool(pending_sleep),
+    }
+
+
 def focus_distraction_today():
     """Return {'focus_sec', 'distraction_sec', 'longest_focus_sec'} for today."""
     data = load_appuse()
@@ -976,6 +1088,7 @@ def status():
         "focus": focus_distraction_today(),
         "moods": moods_today(),
         "compliance": compliance_today(),
+        "sleep": sleep_summary_week(),
     })
 
 
@@ -986,6 +1099,7 @@ def wake():
     next_checkin_time = time.time() + INTERVAL
     notification_pending.clear()
     persist_runtime_state()
+    record_sleep_event("wake")
     log_entry("Woke up")
     return jsonify({"status": "awake"})
 
@@ -996,6 +1110,7 @@ def sleep():
     is_awake = False
     notification_pending.clear()
     persist_runtime_state()
+    record_sleep_event("sleep")
     log_entry("Went to sleep")
     return jsonify({"status": "sleeping"})
 

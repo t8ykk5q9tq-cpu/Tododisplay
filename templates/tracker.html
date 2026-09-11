@@ -152,6 +152,12 @@
         <div id="app-week"></div>
     </div>
 
+    <!-- Sleep this week -->
+    <div class="card">
+        <div class="recent-title">Sleep - This Week</div>
+        <div id="sleep-week"></div>
+    </div>
+
     <div class="card">
         <div class="recent-title">Recent check-ins</div>
         <div id="recent"></div>
@@ -323,6 +329,69 @@
             }).join("");
         }
 
+        function fmtClock(min) {
+            if (min === null || min === undefined) return "--";
+            const h = Math.floor(((min % 1440) + 1440) % 1440 / 60);
+            const m = (((min % 60) + 60) % 60);
+            return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        }
+
+        function fmtHrs(min) {
+            if (min === null || min === undefined) return "--";
+            const h = Math.floor(min / 60), m = min % 60;
+            return h ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function renderSleep(sl) {
+            const el = document.getElementById("sleep-week");
+            if (!sl || !sl.nights || sl.nights.length === 0) {
+                el.innerHTML = '<div class="app-row"><span class="app-name">' +
+                    (sl && sl.in_bed ? "In bed - tap Awake when you get up" : "No sleep logged yet") +
+                    '</span></div>';
+                return;
+            }
+            // summary line
+            const reg = sl.bedtime_regularity_min;
+            const regTxt = (reg === null || reg === undefined) ? "--" : `\u00b1${reg}m`;
+            const regColor = (reg === null) ? "#8b95a5" : (reg <= 30 ? "#00d4ff" : (reg <= 60 ? "#f5a623" : "#e94560"));
+            let html =
+                `<div class="app-row"><span class="app-name">Avg bedtime</span>` +
+                `<span class="app-val">${fmtClock(sl.avg_bedtime_min)}</span></div>` +
+                `<div class="app-row"><span class="app-name">Avg wake</span>` +
+                `<span class="app-val">${fmtClock(sl.avg_waketime_min)}</span></div>` +
+                `<div class="app-row"><span class="app-name">Avg duration</span>` +
+                `<span class="app-val">${fmtHrs(sl.avg_duration_min)}</span></div>` +
+                `<div class="app-row"><span class="app-name">Bedtime regularity</span>` +
+                `<span style="color:${regColor}">${regTxt}</span></div>`;
+            if (sl.in_bed) {
+                html += `<div class="sum-total" style="color:#f5a623">Currently in bed</div>`;
+            }
+            // per-night bars (duration), scaled to peak
+            const peak = Math.max(1, ...sl.nights.map(n => n.duration_min));
+            const dow = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+            const bars = sl.nights.map(n => {
+                const pct = Math.max(6, Math.round((n.duration_min / peak) * 100));
+                const d = new Date(n.date + "T00:00:00");
+                const lbl = isNaN(d) ? "" : dow[d.getDay()];
+                return `<div class="week-bar-col">` +
+                    `<div class="week-bar" style="height:${pct}%"></div>` +
+                    `<div class="week-day">${lbl}</div></div>`;
+            }).join("");
+            html += `<div class="week-app"><div class="week-head">` +
+                `<span class="app-name">Nightly sleep</span>` +
+                `<span class="app-val">last ${fmtHrs(sl.last_duration_min)}</span></div>` +
+                `<div class="week-bars">${bars}</div></div>`;
+            // detail rows
+            html += sl.nights.slice().reverse().map(n => {
+                const d = new Date(n.date + "T00:00:00");
+                const lbl = isNaN(d) ? n.date : dow[d.getDay()];
+                return `<div class="app-row"><span class="app-name">${lbl} ` +
+                    `${fmtClock(n.bed_min)}\u2192${fmtClock(n.wake_min)}</span>` +
+                    `<span class="app-val">${fmtHrs(n.duration_min)}</span></div>`;
+            }).join("");
+            el.innerHTML = html;
+        }
+
         let quickBuilt = false;
         function buildQuickButtons(categories) {
             if (quickBuilt || !categories) return;
@@ -364,6 +433,7 @@
             renderFocus(s.focus);
             renderAppToday(s.app_usage);
             renderAppWeek(s.app_week);
+            renderSleep(s.sleep);
             updateCountdown();
         }
 
