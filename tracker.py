@@ -438,6 +438,22 @@ def app_stop():
     return _tiny_page(f"{app_name}: +{mins}m{suffix}")
 
 
+@app.route("/activeminute")
+def active_minute():
+    """Add one active minute of usage for an app. Called by the Mac watcher
+    once per minute when you're active in a given frontmost app.
+    Usage: /activeminute?app=Mac:Chrome  (adds 60s + 1 'open' to today's total)."""
+    app_name = (request.args.get("app") or "").strip()
+    if not app_name:
+        return "Missing ?app=", 400
+    data = load_appuse()
+    today = date.today().isoformat()
+    data.setdefault("totals", {}).setdefault(today, {})
+    data["totals"][today][app_name] = data["totals"][today].get(app_name, 0) + 60
+    save_appuse(data)
+    return "ok"
+
+
 def app_usage_today():
     """Return today's per-app usage as [{'app', 'seconds', 'opens'}], desc by time."""
     data = load_appuse()
