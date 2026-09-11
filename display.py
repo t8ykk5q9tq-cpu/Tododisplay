@@ -385,6 +385,7 @@ def read_tracker():
         return None
     recent = []
     summary = []
+    app_opens = []
     total_today = 0
     try:
         with open(TRACKER_LOG) as f:
@@ -395,16 +396,21 @@ def read_tracker():
                   if str(e.get("timestamp", "")).startswith(today)]
         recent = todays[-8:]
         total_today = len(todays)
-        # Per-category summary: estimate time = count * check-in interval.
+        # Per-category tallies.
         per_min = TRACKER_INTERVAL_MIN
         counts = {}
         for e in todays:
             cat = e.get("category") or "Other"
             counts[cat] = counts.get(cat, 0) + 1
+        # Split time-based categories (summary) from app-open counts.
         summary = sorted(
-            ({"category": c, "count": n, "minutes": n * per_min,
-              "count_only": c in COUNT_ONLY_CATEGORIES}
-             for c, n in counts.items()),
+            ({"category": c, "minutes": n * per_min}
+             for c, n in counts.items() if c not in COUNT_ONLY_CATEGORIES),
+            key=lambda s: -s["minutes"],
+        )
+        app_opens = sorted(
+            ({"category": c, "count": n}
+             for c, n in counts.items() if c in COUNT_ONLY_CATEGORIES),
             key=lambda s: -s["count"],
         )
     except (OSError, json.JSONDecodeError):
@@ -423,7 +429,8 @@ def read_tracker():
         pass
 
     return {"recent": recent, "next_in": next_in, "is_awake": is_awake,
-            "summary": summary, "total_today": total_today}
+            "summary": summary, "app_opens": app_opens,
+            "total_today": total_today}
 
 
 def last_update_str():
@@ -623,6 +630,31 @@ def draw_habits(screen, fonts, rect, habits):
                              border_radius=3)
 
 
+def draw_app_opens(screen, fonts, rect, app_opens):
+    """Draw the 'App Opens' box: each tracked app + how many times opened today."""
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
+    pad = 20
+    title_surf = fonts["clock"].render("App Opens", True, HEADER_COLOR)
+    screen.blit(title_surf, (x + pad, y + pad))
+
+    line_y = y + pad + title_surf.get_height() + 10
+    line_h = fonts["item"].get_height() + 10
+    bottom = y + h - pad
+    if not app_opens:
+        empty = fonts["item"].render("None today", True, DONE_COLOR)
+        screen.blit(empty, (x + pad, line_y))
+        return
+    for a in app_opens:
+        if line_y + line_h > bottom:
+            break
+        name_surf = fonts["item"].render(a["category"], True, TEXT_COLOR)
+        cnt_surf = fonts["item"].render(f"\u00d7{a['count']}", True, HEADER_COLOR)
+        screen.blit(name_surf, (x + pad, line_y))
+        screen.blit(cnt_surf, (x + w - pad - cnt_surf.get_width(), line_y))
+        line_y += line_h
+
+
 def draw_tracker(screen, fonts, rect, tracker):
     """Draw the time-tracker band: next check-in countdown + recent check-ins."""
     x, y, w, h = rect
@@ -697,11 +729,8 @@ def draw_tracker(screen, fonts, rect, tracker):
         for s in summary:
             if sy + line_h > bottom:
                 break
-            if s.get("count_only"):
-                vstr = f"\u00d7{s['count']}"   # e.g. "x9"
-            else:
-                hh, mm = divmod(s["minutes"], 60)
-                vstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+            hh, mm = divmod(s["minutes"], 60)
+            vstr = f"{hh}h {mm}m" if hh else f"{mm}m"
             cat_surf = item_font.render(s["category"], True, TEXT_COLOR)
             val_surf = item_font.render(vstr, True, HEADER_COLOR)
             screen.blit(cat_surf, (sx, sy))
@@ -926,9 +955,16 @@ def main():
                         (margin, cursor_y, sw - 2 * margin, habits_h), habits_data)
             cursor_y += habits_h + gap
         if tracker_data is not None:
+            band_w = sw - 2 * margin
+            # Split the band: tracker on the left, App Opens box on the right.
+            apps_w = int(band_w * 0.30)
+            tracker_w = band_w - apps_w - gap
             draw_tracker(canvas, fonts,
-                         (margin, cursor_y, sw - 2 * margin, tracker_h),
+                         (margin, cursor_y, tracker_w, tracker_h),
                          tracker_data)
+            draw_app_opens(canvas, fonts,
+                           (margin + tracker_w + gap, cursor_y, apps_w, tracker_h),
+                           tracker_data.get("app_opens", []))
 
         # Daily Stoic quote in its own panel (above the clock). Stoic quotes can
         # be long, so shrink the font to fit the panel width on one line.
