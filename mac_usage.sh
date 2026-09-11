@@ -13,6 +13,10 @@
 #
 # Requires: Tailscale on (or same LAN as the Pi). No special permissions.
 
+# launchd runs with a minimal PATH, so set a full one to find osascript,
+# ioreg, curl, awk, mktemp, etc.
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
+
 # Pi tracker base URL (Tailscale address).
 TRACKER_URL="${TRACKER_URL:-http://100.102.96.42:5050}"
 INTERVAL=10       # seconds between samples
