@@ -34,11 +34,27 @@ Repeat the exact steps above, but:
 
 ---
 
+## Track actual TIME in app (open + close automations)
+
+For real time-spent (not just opens), make TWO automations per app - one for
+open, one for close - pointing at the timing endpoints:
+
+- **When [TikTok] Is Opened** -> Get Contents of URL:
+  `http://100.102.96.42:5050/appstart?app=TikTok`
+- **When [TikTok] Is Closed** -> Get Contents of URL:
+  `http://100.102.96.42:5050/appstop?app=TikTok`
+
+The server computes close-minus-open = time spent, and the display's "App Time"
+box shows today's total per app (e.g. "TikTok 47m"). Sessions longer than 4h
+are ignored (guards against the phone sleeping with the app "open").
+
+Turn OFF "Ask Before Running" on both so they fire silently.
+
 ## Notes
 
-- Each time you open the app, a check-in is logged. This tracks HOW OFTEN you
-  open them (a usage signal), not exact watch duration — iOS doesn't expose
-  duration to automations.
+- The open-only `/quicklog?category=...` approach (above) tracks HOW OFTEN you
+  open an app. The open+close `/appstart` + `/appstop` approach tracks actual
+  TIME spent. Use whichever you prefer (or both).
 - If the Pi's Tailscale address changes, update the URLs here and in the
   automations.
 - To add more apps (Instagram, etc.): add the category to `CATEGORIES` in

@@ -44,6 +44,7 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tracker_log.json")
 STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
+APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")  # per-app session times
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 INTERVAL = int(getattr(cfg, "CHECKIN_INTERVAL_MIN", 30)) * 60
@@ -333,6 +334,78 @@ def quick_log():
             f"<p>You can close this.</p></body></html>")
 
 
+# --- App usage timing (open -> close = time spent in app) ---
+# Fire /appstart?app=TikTok when the app opens, /appstop?app=TikTok when it
+# closes. The server computes the duration and tallies today's total per app.
+# Structure: {"open": {"TikTok": <start_epoch>}, "totals": {"YYYY-MM-DD": {"TikTok": seconds}}}
+MAX_SESSION_SEC = 4 * 60 * 60  # ignore absurd sessions (e.g. phone slept 8h)
+
+
+def load_appuse():
+    if os.path.exists(APPUSE_FILE):
+        try:
+            with open(APPUSE_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"open": {}, "totals": {}}
+
+
+def save_appuse(data):
+    with open(APPUSE_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def _tiny_page(msg):
+    return (f"<html><body style='font-family:sans-serif;background:#1a1a2e;"
+            f"color:#eaeaea;text-align:center;padding-top:3rem'>"
+            f"<h2 style='color:#00d4ff'>{msg}</h2>"
+            f"<p>You can close this.</p></body></html>")
+
+
+@app.route("/appstart")
+def app_start():
+    app_name = (request.args.get("app") or "").strip()
+    if not app_name:
+        return "Missing ?app=", 400
+    data = load_appuse()
+    data["open"][app_name] = time.time()
+    save_appuse(data)
+    return _tiny_page(f"Started: {app_name}")
+
+
+@app.route("/appstop")
+def app_stop():
+    app_name = (request.args.get("app") or "").strip()
+    if not app_name:
+        return "Missing ?app=", 400
+    data = load_appuse()
+    start = data["open"].pop(app_name, None)
+    if start is None:
+        save_appuse(data)
+        return _tiny_page(f"{app_name}: no open session")
+    elapsed = int(time.time() - start)
+    if 0 < elapsed <= MAX_SESSION_SEC:
+        today = date.today().isoformat()
+        data.setdefault("totals", {}).setdefault(today, {})
+        data["totals"][today][app_name] = \
+            data["totals"][today].get(app_name, 0) + elapsed
+    save_appuse(data)
+    mins = max(1, elapsed // 60)
+    return _tiny_page(f"{app_name}: +{mins}m")
+
+
+def app_usage_today():
+    """Return today's per-app usage as [{'app': name, 'seconds': n}], desc."""
+    data = load_appuse()
+    today = date.today().isoformat()
+    totals = data.get("totals", {}).get(today, {})
+    return sorted(
+        ({"app": a, "seconds": s} for a, s in totals.items()),
+        key=lambda r: -r["seconds"],
+    )
+
+
 @app.route("/categories")
 def categories():
     return jsonify({"categories": CATEGORIES})
@@ -373,6 +446,7 @@ def status():
         "categories": CATEGORIES,
         "summary": daily_summary(todays),
         "total_checkins": len(todays),
+        "app_usage": app_usage_today(),
     })
 
 

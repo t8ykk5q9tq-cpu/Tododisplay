@@ -22,6 +22,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lists.db")
 TRACKER_LOG = os.path.join(BASE_DIR, "tracker_log.json")
 TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
+APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")
 # Minutes per check-in, used to estimate time-per-category in the summary.
 # Should match tracker.py's CHECKIN_INTERVAL_MIN.
 TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
@@ -402,16 +403,26 @@ def read_tracker():
         for e in todays:
             cat = e.get("category") or "Other"
             counts[cat] = counts.get(cat, 0) + 1
-        # Split time-based categories (summary) from app-open counts.
+        # Time-based categories (from check-ins). App categories are excluded
+        # here; their real time comes from app_usage.json (open->close sessions).
         summary = sorted(
             ({"category": c, "minutes": n * per_min}
              for c, n in counts.items() if c not in COUNT_ONLY_CATEGORIES),
             key=lambda s: -s["minutes"],
         )
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    # App usage: real time spent, from open/close sessions.
+    app_opens = []
+    try:
+        with open(APPUSE_FILE) as f:
+            au = json.load(f)
+        today = datetime.now().date().isoformat()
+        totals = au.get("totals", {}).get(today, {})
         app_opens = sorted(
-            ({"category": c, "count": n}
-             for c, n in counts.items() if c in COUNT_ONLY_CATEGORIES),
-            key=lambda s: -s["count"],
+            ({"category": a, "seconds": s} for a, s in totals.items()),
+            key=lambda r: -r["seconds"],
         )
     except (OSError, json.JSONDecodeError):
         pass
@@ -631,11 +642,12 @@ def draw_habits(screen, fonts, rect, habits):
 
 
 def draw_app_opens(screen, fonts, rect, app_opens):
-    """Draw the 'App Opens' box: each tracked app + how many times opened today."""
+    """Draw the 'App Time' box: real time spent in each tracked app today
+    (from open/close sessions)."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
     pad = 20
-    title_surf = fonts["clock"].render("App Opens", True, HEADER_COLOR)
+    title_surf = fonts["clock"].render("App Time", True, HEADER_COLOR)
     screen.blit(title_surf, (x + pad, y + pad))
 
     line_y = y + pad + title_surf.get_height() + 10
@@ -648,10 +660,14 @@ def draw_app_opens(screen, fonts, rect, app_opens):
     for a in app_opens:
         if line_y + line_h > bottom:
             break
+        secs = a.get("seconds", 0)
+        mins = secs // 60
+        hh, mm = divmod(mins, 60)
+        vstr = f"{hh}h {mm}m" if hh else f"{mm}m"
         name_surf = fonts["item"].render(a["category"], True, TEXT_COLOR)
-        cnt_surf = fonts["item"].render(f"\u00d7{a['count']}", True, HEADER_COLOR)
+        val_surf = fonts["item"].render(vstr, True, HEADER_COLOR)
         screen.blit(name_surf, (x + pad, line_y))
-        screen.blit(cnt_surf, (x + w - pad - cnt_surf.get_width(), line_y))
+        screen.blit(val_surf, (x + w - pad - val_surf.get_width(), line_y))
         line_y += line_h
 
 
