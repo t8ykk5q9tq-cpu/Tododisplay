@@ -493,28 +493,6 @@ GH_GREENS = [
 ]
 
 
-def draw_wifi_icon(screen, cx, cy, size, online):
-    """Draw a small Wi-Fi glyph centered horizontally at cx, with its base dot
-    at cy. Cyan when online; grey with a slash when offline."""
-    import math
-    color = HEADER_COLOR if online else DONE_COLOR
-    # Base dot
-    dot_r = max(2, size // 8)
-    pygame.draw.circle(screen, color, (cx, cy), dot_r)
-    # Three concentric arcs above the dot (widening signal waves).
-    for i in range(1, 4):
-        r = int(size * i / 3)
-        rect = pygame.Rect(cx - r, cy - r, 2 * r, 2 * r)
-        # Arc from ~225deg to ~315deg (top arc), in radians.
-        pygame.draw.arc(screen, color, rect,
-                        math.radians(55), math.radians(125),
-                        max(2, size // 10))
-    # Slash through it when offline.
-    if not online:
-        pygame.draw.line(screen, WARN_COLOR,
-                         (cx - size, cy - size), (cx + size, cy + dot_r), 3)
-
-
 def draw_habits(screen, fonts, rect, habits):
     """Draw habits as CARDS, matching the phone layout: each card has a header
     row (checkbox + name + streak) with a GitHub-style 7-wide day grid below.
@@ -801,10 +779,12 @@ def main():
             pw_surf = fonts["tiny"].render("\u26a0 " + power_warn, True, WARN_COLOR)
             canvas.blit(pw_surf, (margin + 12, margin + 6))
 
-        # Wi-Fi connectivity indicator in the weather bar's top-right corner.
-        wifi_size = max(10, tiny_h)
-        draw_wifi_icon(canvas, sw - margin - wifi_size - 6,
-                       margin + wifi_size + 4, wifi_size, is_online())
+        # Connectivity indicator: text in the weather bar's top-right corner.
+        online = is_online()
+        net_txt = "Connected" if online else "Offline"
+        net_color = HEADER_COLOR if online else WARN_COLOR
+        net_surf = fonts["tiny"].render(net_txt, True, net_color)
+        canvas.blit(net_surf, (sw - margin - net_surf.get_width() - 8, margin + 6))
 
         # Everything below the weather bar starts here.
         top = margin + weather_bar_h + gap
