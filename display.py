@@ -25,6 +25,8 @@ TRACKER_STATE = os.path.join(BASE_DIR, "tracker_state.json")
 # Minutes per check-in, used to estimate time-per-category in the summary.
 # Should match tracker.py's CHECKIN_INTERVAL_MIN.
 TRACKER_INTERVAL_MIN = int(os.environ.get("CHECKIN_INTERVAL_MIN", "30"))
+# Categories shown as a count (e.g. "TikTok x9") instead of estimated time.
+COUNT_ONLY_CATEGORIES = {"TikTok", "YouTube"}
 
 # --- Weather (Open-Meteo: free, no API key needed) ---
 # Set your location via env vars; defaults below can be edited.
@@ -400,8 +402,10 @@ def read_tracker():
             cat = e.get("category") or "Other"
             counts[cat] = counts.get(cat, 0) + 1
         summary = sorted(
-            ({"category": c, "minutes": n * per_min} for c, n in counts.items()),
-            key=lambda s: -s["minutes"],
+            ({"category": c, "count": n, "minutes": n * per_min,
+              "count_only": c in COUNT_ONLY_CATEGORIES}
+             for c, n in counts.items()),
+            key=lambda s: -s["count"],
         )
     except (OSError, json.JSONDecodeError):
         pass
@@ -693,13 +697,15 @@ def draw_tracker(screen, fonts, rect, tracker):
         for s in summary:
             if sy + line_h > bottom:
                 break
-            mins = s["minutes"]
-            hh, mm = divmod(mins, 60)
-            tstr = f"{hh}h {mm}m" if hh else f"{mm}m"
+            if s.get("count_only"):
+                vstr = f"\u00d7{s['count']}"   # e.g. "x9"
+            else:
+                hh, mm = divmod(s["minutes"], 60)
+                vstr = f"{hh}h {mm}m" if hh else f"{mm}m"
             cat_surf = item_font.render(s["category"], True, TEXT_COLOR)
-            time_surf = item_font.render(tstr, True, HEADER_COLOR)
+            val_surf = item_font.render(vstr, True, HEADER_COLOR)
             screen.blit(cat_surf, (sx, sy))
-            screen.blit(time_surf, (x + w - pad - time_surf.get_width(), sy))
+            screen.blit(val_surf, (x + w - pad - val_surf.get_width(), sy))
             sy += line_h
 
 

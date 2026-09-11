@@ -54,6 +54,10 @@ HABIT_REMINDER_HOUR = int(getattr(cfg, "HABIT_REMINDER_HOUR", 20))
 CATEGORIES = list(getattr(cfg, "CATEGORIES",
                           ["Work", "Break", "Meal", "Errands", "Health",
                            "Personal", "TikTok", "YouTube"]))
+# Categories shown as a plain count ("TikTok x9") instead of estimated time,
+# since app-opens don't imply a full interval of activity.
+COUNT_ONLY_CATEGORIES = set(getattr(cfg, "COUNT_ONLY_CATEGORIES",
+                                    ["TikTok", "YouTube"]))
 # The Pi's reachable tracker URL, used so the Pushover reminder can deep-link
 # to the check-in page. Defaults to the Pi 5's Tailscale address; override in
 # tracker_config.py with PI_BASE_URL if it changes.
@@ -348,9 +352,10 @@ def daily_summary(entries):
     for e in entries:
         cat = e.get("category") or "Other"
         counts[cat] = counts.get(cat, 0) + 1
-    # Sorted by most time first.
+    # Sorted by most first. count_only categories show a count, not est. time.
     summary = [
-        {"category": c, "count": n, "minutes": n * per_min}
+        {"category": c, "count": n, "minutes": n * per_min,
+         "count_only": c in COUNT_ONLY_CATEGORIES}
         for c, n in sorted(counts.items(), key=lambda kv: -kv[1])
     ]
     return summary

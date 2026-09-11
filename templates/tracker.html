@@ -144,13 +144,14 @@
                 el.innerHTML = '<div class="sum-row"><span class="sum-cat">Nothing logged yet</span></div>';
                 return;
             }
-            const fmtMin = (m) => {
-                const h = Math.floor(m / 60), mm = m % 60;
+            const fmtVal = (s) => {
+                if (s.count_only) return `\u00d7${s.count}`;
+                const h = Math.floor(s.minutes / 60), mm = s.minutes % 60;
                 return h ? `${h}h ${mm}m` : `${mm}m`;
             };
             el.innerHTML = summary.map(s =>
                 `<div class="sum-row"><span class="sum-cat">${s.category}</span>` +
-                `<span class="sum-time">${fmtMin(s.minutes)}</span></div>`
+                `<span class="sum-time">${fmtVal(s)}</span></div>`
             ).join("") + `<div class="sum-total">${total} check-in(s) today</div>`;
         }
 

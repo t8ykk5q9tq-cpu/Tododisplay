@@ -31,6 +31,9 @@ HABIT_REMINDER_HOUR = 20
 # --- Check-in categories (quick-pick buttons + tags + daily summary) ---
 CATEGORIES = ["Work", "Break", "Meal", "Errands", "Health", "Personal",
               "TikTok", "YouTube"]
+# These show as a count ("TikTok x9") instead of estimated time in the summary
+# (good for app-opens, which don't imply a full interval of activity).
+COUNT_ONLY_CATEGORIES = ["TikTok", "YouTube"]
 
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
