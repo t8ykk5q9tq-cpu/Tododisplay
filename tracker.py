@@ -363,14 +363,25 @@ def _tiny_page(msg):
             f"<p>You can close this.</p></body></html>")
 
 
+# Ignore a repeat /appstart for the same app within this window (guards against
+# iOS "Is Opened" automations firing the request twice).
+APPSTART_DEBOUNCE_SEC = 60
+
+
 @app.route("/appstart")
 def app_start():
     app_name = (request.args.get("app") or "").strip()
     if not app_name:
         return "Missing ?app=", 400
     data = load_appuse()
-    data["open"][app_name] = time.time()
-    # Count this open in today's per-app open tally.
+    now = time.time()
+    prev_open = data["open"].get(app_name)
+    # Debounce: if we already have a very recent open for this app, treat this
+    # as a duplicate fire - keep the existing session, don't count a new open.
+    if prev_open is not None and (now - prev_open) < APPSTART_DEBOUNCE_SEC:
+        save_appuse(data)
+        return _tiny_page(f"{app_name}: already open")
+    data["open"][app_name] = now
     today = date.today().isoformat()
     data.setdefault("opens", {}).setdefault(today, {})
     data["opens"][today][app_name] = data["opens"][today].get(app_name, 0) + 1
