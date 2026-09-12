@@ -468,7 +468,9 @@ def quick_log():
 # Fire /appstart?app=TikTok when the app opens, /appstop?app=TikTok when it
 # closes. The server computes the duration and tallies today's total per app.
 # Structure: {"open": {"TikTok": <start_epoch>}, "totals": {"YYYY-MM-DD": {"TikTok": seconds}}}
-MAX_SESSION_SEC = 4 * 60 * 60  # ignore absurd sessions (e.g. phone slept 8h)
+MAX_SESSION_SEC = 2 * 60 * 60  # a single sitting caps here; a session left
+#                                open longer than this is auto-closed by the
+#                                minute-crediting thread (forgotten /appstop).
 
 
 def load_appuse():
@@ -504,6 +506,25 @@ def normalize_app_name(raw):
     return _CANON_APPS.get(key.lower(), key)
 
 
+def check_app_limit(data, app_name, today):
+    """Fire one Pushover per app per day when today's total crosses the limit.
+    Returns True if an alert was sent. Mutates `data` (records 'alerted')."""
+    if APP_TIME_LIMIT_MIN <= 0:
+        return False
+    total = data.get("totals", {}).get(today, {}).get(app_name, 0)
+    if total < APP_TIME_LIMIT_MIN * 60:
+        return False
+    alerted = data.setdefault("alerted", {}).setdefault(today, [])
+    if app_name in alerted:
+        return False
+    alerted.append(app_name)
+    send_pushover(
+        f"You've used {app_name} for {total // 60} min today "
+        f"(limit {APP_TIME_LIMIT_MIN} min).",
+        title="Screen-time limit reached")
+    return True
+
+
 # Ignore a repeat /appstart for the same app within this window (guards against
 # iOS "Is Opened" automations firing the request twice). Kept short so genuine
 # quick re-opens are still counted -- only true instant double-fires are dropped.
@@ -526,14 +547,15 @@ def app_start():
         if gap < APPSTART_DEBOUNCE_SEC:
             save_appuse(data)
             return _tiny_page(f"{app_name}: already open")
-        # Otherwise a previous session was left open (missed /appstop). Bank
-        # its time now instead of losing it, then start the new session.
-        if 0 < gap <= MAX_SESSION_SEC:
-            data.setdefault("totals", {}).setdefault(today, {})
-            data["totals"][today][app_name] = \
-                data["totals"][today].get(app_name, 0) + int(gap)
+        # A session was left open (missed /appstop). The minute-crediting thread
+        # has already been banking its time while it was open, so we DON'T
+        # re-bank the gap here (that used to double-count / inflate). Just start
+        # a fresh session below.
 
     data["open"][app_name] = now
+    # Track how many seconds of this open session we've already credited so the
+    # minute-thread and /appstop never double-count. Starts at 0 for a new open.
+    data.setdefault("credited", {})[app_name] = 0
     data.setdefault("opens", {}).setdefault(today, {})
     data["opens"][today][app_name] = data["opens"][today].get(app_name, 0) + 1
     save_appuse(data)
@@ -547,29 +569,23 @@ def app_stop():
         return "Missing ?app=", 400
     data = load_appuse()
     start = data["open"].pop(app_name, None)
+    already = data.get("credited", {}).pop(app_name, 0)
     if start is None:
         save_appuse(data)
         return _tiny_page(f"{app_name}: no open session")
     elapsed = int(time.time() - start)
+    # The minute-thread already banked `already` seconds of this session; only
+    # add whatever remains uncredited (avoids double-counting).
+    remaining = elapsed - int(already)
     crossed_limit = False
     total_today = 0
-    if 0 < elapsed <= MAX_SESSION_SEC:
-        today = date.today().isoformat()
+    today = date.today().isoformat()
+    if remaining > 0 and elapsed <= MAX_SESSION_SEC:
         data.setdefault("totals", {}).setdefault(today, {})
         data["totals"][today][app_name] = \
-            data["totals"][today].get(app_name, 0) + elapsed
-        total_today = data["totals"][today][app_name]
-        # Fire a limit alert once per app per day when crossing the threshold.
-        if APP_TIME_LIMIT_MIN > 0 and total_today >= APP_TIME_LIMIT_MIN * 60:
-            alerted = data.setdefault("alerted", {}).setdefault(today, [])
-            if app_name not in alerted:
-                alerted.append(app_name)
-                mins = total_today // 60
-                send_pushover(
-                    f"You've used {app_name} for {mins} min today "
-                    f"(limit {APP_TIME_LIMIT_MIN} min).",
-                    title="Screen-time limit reached")
-                crossed_limit = True
+            data["totals"][today].get(app_name, 0) + remaining
+    total_today = data.get("totals", {}).get(today, {}).get(app_name, 0)
+    crossed_limit = check_app_limit(data, app_name, today)
     save_appuse(data)
     mins = max(1, elapsed // 60)
     suffix = "  (limit reached!)" if crossed_limit else ""
@@ -1220,6 +1236,49 @@ def backup_thread():
         time.sleep(60)
 
 
+def session_credit_thread():
+    """Every minute, credit elapsed time to each currently-open app session so
+    usage accrues live and doesn't depend on a perfect /appstop. Tracks how much
+    each session has been credited (data['credited']) so /appstop only adds the
+    remainder. Auto-closes a session once it hits MAX_SESSION_SEC (a forgotten
+    /appstop can't run all night)."""
+    while True:
+        time.sleep(60)
+        try:
+            data = load_appuse()
+            open_sessions = data.get("open", {})
+            if not open_sessions:
+                continue
+            now = time.time()
+            today = date.today().isoformat()
+            data.setdefault("totals", {}).setdefault(today, {})
+            credited = data.setdefault("credited", {})
+            changed = False
+            for app_name in list(open_sessions):
+                start = open_sessions[app_name]
+                elapsed = int(now - start)
+                if elapsed <= 0:
+                    continue
+                capped = min(elapsed, MAX_SESSION_SEC)
+                already = int(credited.get(app_name, 0))
+                delta = capped - already
+                if delta > 0:
+                    data["totals"][today][app_name] = \
+                        data["totals"][today].get(app_name, 0) + delta
+                    credited[app_name] = capped
+                    check_app_limit(data, app_name, today)
+                    changed = True
+                # Auto-close a session that has run past the cap.
+                if elapsed >= MAX_SESSION_SEC:
+                    open_sessions.pop(app_name, None)
+                    credited.pop(app_name, None)
+                    changed = True
+            if changed:
+                save_appuse(data)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+
 def _mins_before(target_min, now_min):
     """Minutes from now_min until target_min on a 24h circle (0..1439).
     e.g. now 22:40, target 23:00 -> 20; now 23:10, target 23:00 -> 1430."""
@@ -1562,6 +1621,7 @@ if __name__ == "__main__":
     Thread(target=daily_summary_push_thread, daemon=True).start()
     Thread(target=weekly_review_push_thread, daemon=True).start()
     Thread(target=backup_thread, daemon=True).start()
+    Thread(target=session_credit_thread, daemon=True).start()
     Thread(target=winddown_nudge_thread, daemon=True).start()
     Thread(target=compliance_nag_thread, daemon=True).start()
     Thread(target=app_open_nudge_thread, daemon=True).start()
