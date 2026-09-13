@@ -91,62 +91,67 @@ async function buildWidget() {
     bigColor = MUTED;
   }
 
-  // --- Two-column body: left = last check-in, right = past check-ins ---
-  const body = w.addStack();
-  body.topAlignContent();
+  // --- Top status band: big time on the left, current activity on the right,
+  // using the full width instead of a narrow left column. ---
+  const band = w.addStack();
+  band.centerAlignContent();
 
-  // LEFT column
-  const left = body.addStack();
-  left.layoutVertically();
-
-  const cd = left.addText(bigText);
-  cd.font = Font.boldSystemFont(size === "small" ? 24 : 32);
+  const cd = band.addText(bigText);
+  cd.font = Font.boldSystemFont(size === "small" ? 24 : 30);
   cd.textColor = bigColor;
 
-  const label = left.addText(labelText);
-  label.font = Font.systemFont(11);
-  label.textColor = MUTED;
+  band.addSpacer(12);
 
+  // Right side of the band: label on top, current activity below it.
+  const bandR = band.addStack();
+  bandR.layoutVertically();
+  const label = bandR.addText(labelText.toUpperCase());
+  label.font = Font.semiboldSystemFont(9);
+  label.textColor = MUTED;
   if (last && !status.notification_pending) {
-    left.addSpacer(4);
-    const lastText = left.addText(last.text);
-    lastText.font = Font.mediumSystemFont(size === "small" ? 12 : 13);
+    bandR.addSpacer(2);
+    const lastText = bandR.addText(last.text);
+    lastText.font = Font.mediumSystemFont(size === "small" ? 13 : 15);
     lastText.textColor = ACCENT;
     lastText.lineLimit = 2;
   }
+  band.addSpacer();
 
-  // RIGHT column (medium/large only — small has no room)
-  if (size !== "small") {
-    body.addSpacer(14);
-    const right = body.addStack();
-    right.layoutVertically();
+  // Small widget stops here (no room for the recent list).
+  if (size === "small") return w;
 
-    const rTitle = right.addText("Recent");
-    rTitle.font = Font.systemFont(9);
-    rTitle.textColor = MUTED;
-    right.addSpacer(4);
+  // Full-width divider (spacer forces the stack to stretch across the widget).
+  w.addSpacer(10);
+  const div = w.addStack();
+  div.backgroundColor = new Color("#2a2f4a");
+  div.addSpacer();          // stretches width
+  div.setPadding(0.5, 0, 0.5, 0);  // ~1pt tall
+  w.addSpacer(8);
 
-    // Past check-ins, newest first, excluding the one shown on the left.
-    const earlier = all.slice(0, -1).reverse();
-    const maxRows = size === "large" ? 6 : 4;
-    if (earlier.length === 0) {
-      const none = right.addText("—");
-      none.font = Font.systemFont(11);
-      none.textColor = MUTED;
-    } else {
-      for (const e of earlier.slice(0, maxRows)) {
-        const r = right.addStack();
-        r.spacing = 6;
-        const tm = r.addText(fmtTime(e.timestamp));
-        tm.font = Font.regularMonospacedSystemFont(10.5);
-        tm.textColor = ACCENT;
-        const tx = r.addText(e.text);
-        tx.font = Font.systemFont(11);
-        tx.textColor = WHITE;
-        tx.lineLimit = 1;
-        right.addSpacer(4);
-      }
-    }
+  // --- Recent list, full width: time left (accent), text flowing, newest
+  // first, excluding the one shown in the band above. ---
+  const earlier = all.slice(0, -1).reverse();
+  const maxRows = size === "large" ? 8 : 4;
+  if (earlier.length === 0) {
+    const none = w.addText("No earlier check-ins today");
+    none.font = Font.systemFont(11);
+    none.textColor = MUTED;
+  } else {
+    const rows = earlier.slice(0, maxRows);
+    rows.forEach((e, i) => {
+      const r = w.addStack();
+      r.centerAlignContent();
+      const tm = r.addText(fmtTime(e.timestamp));
+      tm.font = Font.regularMonospacedSystemFont(11);
+      tm.textColor = ACCENT;
+      r.addSpacer(10);
+      const tx = r.addText(e.text);
+      tx.font = Font.systemFont(12);
+      tx.textColor = WHITE;
+      tx.lineLimit = 1;
+      r.addSpacer();
+      if (i < rows.length - 1) w.addSpacer(size === "large" ? 5 : 6);
+    });
   }
 
   return w;
