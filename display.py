@@ -29,7 +29,7 @@ SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")
-WATER_GOAL = int(os.environ.get("WATER_GOAL", "8"))
+WATER_GOAL = int(os.environ.get("WATER_GOAL", "3"))
 METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
 METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
 COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
@@ -967,7 +967,7 @@ def draw_tracker(screen, fonts, rect, tracker):
         wm_y = y + pad + title_surf.get_height() + 4 + sub * n_above
         parts = []
         if water:
-            parts.append(f"Water {water['glasses']}/{water['goal']}")
+            parts.append(f"Water {water['glasses']}/{water['goal']}L")
         if metric and metric.get("latest") is not None:
             chg = ""
             if metric.get("change"):

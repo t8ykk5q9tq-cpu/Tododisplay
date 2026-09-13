@@ -49,7 +49,7 @@ STATE_FILE = os.path.join(BASE_DIR, "tracker_state.json")
 APPUSE_FILE = os.path.join(BASE_DIR, "app_usage.json")  # per-app session times
 MOOD_FILE = os.path.join(BASE_DIR, "mood_log.json")     # mood check-ins (1-5)
 SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
-WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water glasses per day
+WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water bottles (1 L) per day
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")  # daily numeric metric (weight)
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")  # one line per day
 USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")  # active minute-of-day indices per date
@@ -121,9 +121,9 @@ APP_OPEN_NUDGE_MIN = int(getattr(cfg, "APP_OPEN_NUDGE_MIN", 5))
 APP_OPEN_RENUDGE_MIN = int(getattr(cfg, "APP_OPEN_RENUDGE_MIN", 5))
 NUDGE_APPS = set(getattr(cfg, "NUDGE_APPS", ["TikTok", "YouTube"]))
 
-# Hydration: daily goal in glasses. Tap logs a glass; the board/display show a
-# progress bar toward this goal.
-WATER_GOAL = int(getattr(cfg, "WATER_GOAL", 8))
+# Hydration: daily goal in 1 L bottles. Tap logs a bottle; the board/display
+# show a progress bar toward this goal.
+WATER_GOAL = int(getattr(cfg, "WATER_GOAL", 3))
 # Daily numeric metric (e.g. weight). METRIC_LABEL/UNIT are display-only.
 METRIC_LABEL = str(getattr(cfg, "METRIC_LABEL", "Weight"))
 METRIC_UNIT = str(getattr(cfg, "METRIC_UNIT", "lb"))
@@ -860,7 +860,7 @@ def water_today():
 
 @app.route("/water", methods=["GET", "POST"])
 def log_water():
-    """Adjust today's water count. /water?delta=1 adds a glass, delta=-1 undoes.
+    """Adjust today's water count. /water?delta=1 adds a bottle, delta=-1 undoes.
     GET so a bookmark/Shortcut works; POST also accepted."""
     if request.method == "POST":
         delta = (request.get_json(silent=True) or {}).get("delta", 1)

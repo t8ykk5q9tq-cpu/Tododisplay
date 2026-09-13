@@ -141,7 +141,7 @@
                 <div id="mood-comp"></div>
             </div>
             <div class="panel" style="flex:0 0 auto">
-                <h2>Water</h2>
+                <h2>Water (1 L bottles)</h2>
                 <div id="water"></div>
             </div>
             <div class="panel" style="flex:0 0 auto">
@@ -264,7 +264,7 @@
             const full = w.glasses >= w.goal;
             el.innerHTML =
                 `<div class="stat-row"><span>Today</span>` +
-                `<span class="v">${w.glasses} / ${w.goal} glasses</span></div>` +
+                `<span class="v">${w.glasses} / ${w.goal} bottles</span></div>` +
                 `<div class="wbar-track"><div class="wbar-fill ${full ? "full" : ""}" style="width:${w.percent}%"></div></div>` +
                 (full ? '<div class="sub good">Goal reached \u2713</div>' : "");
         }

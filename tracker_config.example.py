@@ -80,7 +80,7 @@ APP_OPEN_RENUDGE_MIN = 5       # keep nudging this often while still open
 NUDGE_APPS = ["TikTok", "YouTube"]
 
 # --- Health: hydration + a daily numeric metric ---
-WATER_GOAL = 8                 # glasses of water per day (progress bar goal)
+WATER_GOAL = 3                 # 1 L bottles of water per day (progress bar goal)
 METRIC_LABEL = "Weight"        # label for the daily number you log
 METRIC_UNIT = "lb"             # unit shown next to it (e.g. "lb", "kg")
 

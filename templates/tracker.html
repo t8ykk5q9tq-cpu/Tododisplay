@@ -171,9 +171,9 @@
         <div class="sum-total" id="mood-today"></div>
     </div>
 
-    <!-- Water / hydration -->
+    <!-- Water / hydration (1 L bottles) -->
     <div class="card">
-        <div class="recent-title">Water</div>
+        <div class="recent-title">Water (1 L bottles)</div>
         <div class="water-row">
             <button class="water-btn" id="water-minus">&minus;</button>
             <div class="water-count"><span class="g" id="water-glasses">0</span>
@@ -353,7 +353,7 @@
         function renderWater(w) {
             if (!w) return;
             document.getElementById("water-glasses").textContent = w.glasses;
-            document.getElementById("water-goal").textContent = "/ " + w.goal + " glasses";
+            document.getElementById("water-goal").textContent = "/ " + w.goal + " bottles";
             const fill = document.getElementById("water-fill");
             fill.style.width = w.percent + "%";
             fill.classList.toggle("full", w.glasses >= w.goal);
