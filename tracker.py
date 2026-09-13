@@ -206,6 +206,11 @@ def send_pushover(message, title="Time Tracker", url=None, url_title=None,
     }
     if priority:
         payload["priority"] = priority   # 1 = high (bypasses quiet hours)
+    # Default every notification to open the tracker page when tapped, unless
+    # the caller supplied a specific link. Requires PI_BASE_URL to be set.
+    if not url and PI_BASE_URL:
+        url = PI_BASE_URL.rstrip("/") + "/"
+        url_title = url_title or "Open tracker"
     if url:
         payload["url"] = url
         if url_title:
@@ -219,6 +224,13 @@ def send_pushover(message, title="Time Tracker", url=None, url_title=None,
         _pushover_budget_increment()
     except Exception as e:
         print(f"Pushover error: {e}")
+
+
+def _page_url(path=""):
+    """Build a link to a tracker page (e.g. '/usage'). Empty if no base URL."""
+    if not PI_BASE_URL:
+        return None
+    return PI_BASE_URL.rstrip("/") + "/" + path.lstrip("/")
 
 
 def load_log():
@@ -630,7 +642,8 @@ def check_app_limit(data, app_name, today):
     send_pushover(
         f"You've used {app_name} for {total // 60} min today "
         f"(limit {APP_TIME_LIMIT_MIN} min).",
-        title="Screen-time limit reached")
+        title="Screen-time limit reached",
+        url=_page_url("/usage"), url_title="See screen usage")
     return True
 
 
@@ -1199,7 +1212,8 @@ def daily_summary_push_thread():
         today = now.date().isoformat()
         if now.hour == DAILY_SUMMARY_HOUR and last_sent != today:
             last_sent = today
-            send_pushover(build_daily_summary(), title="Daily summary")
+            send_pushover(build_daily_summary(), title="Daily summary",
+                          url=_page_url("/usage"), url_title="See screen usage")
         time.sleep(60)
 
 
@@ -1298,7 +1312,8 @@ def weekly_review_push_thread():
                 and now.hour == WEEKLY_REVIEW_HOUR
                 and last_sent != stamp):
             last_sent = stamp
-            send_pushover(build_weekly_review(), title="Weekly review")
+            send_pushover(build_weekly_review(), title="Weekly review",
+                          url=_page_url("/usage"), url_title="See screen usage")
         time.sleep(60)
 
 
@@ -1440,7 +1455,8 @@ def winddown_nudge_thread():
                         send_pushover(
                             f"It's near your usual bedtime ({bstr}) and you're "
                             f"in {app}. Time to wind down for sleep.",
-                            title="Wind down", priority=1)
+                            title="Wind down", priority=1,
+                            url=_page_url("/usage"), url_title="See screen usage")
                         last_nudge_date = night_key
         except Exception:
             pass
@@ -1497,7 +1513,8 @@ def app_open_nudge_thread():
                 send_pushover(
                     f"You've been in {app_name} for {int(open_min)} min. "
                     f"Close it and get back to it.",
-                    title="Close the app", priority=1)
+                    title="Close the app", priority=1,
+                    url=_page_url("/usage"), url_title="See screen usage")
                 last_nudge[app_name] = now
         # Forget nudge state for apps that are no longer open (session ended).
         for a in list(last_nudge):
@@ -1715,7 +1732,8 @@ def habit_reminder_test():
 def daily_summary_test():
     """Send the end-of-day summary right now, for testing."""
     text = build_daily_summary()
-    send_pushover(text, title="Daily summary")
+    send_pushover(text, title="Daily summary",
+                  url=_page_url("/usage"), url_title="See screen usage")
     return jsonify({"sent": True, "summary": text})
 
 
@@ -1723,7 +1741,8 @@ def daily_summary_test():
 def weekly_review_test():
     """Send the weekly review right now, for testing."""
     text = build_weekly_review()
-    send_pushover(text, title="Weekly review")
+    send_pushover(text, title="Weekly review",
+                  url=_page_url("/usage"), url_title="See screen usage")
     return jsonify({"sent": True, "review": text})
 
 
