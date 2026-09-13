@@ -445,6 +445,18 @@ def usage_data():
         per_app[key] = per_app.get(key, 0) + 1
     colors = dict(USAGE_APP_COLORS)
     colors["Other"] = USAGE_DEFAULT_COLOR
+
+    # Extra screen/Mac info for the summary cards (only for today's view).
+    app_today = None
+    focus = None
+    mac_week = None
+    if day == date.today().isoformat():
+        app_today = app_usage_today()
+        focus = focus_distraction_today()
+        week = app_usage_week()
+        mac_apps = [a for a in week["apps"] if a["app"].startswith("Mac:")][:6]
+        mac_week = {"days": week["days"], "apps": mac_apps}
+
     return jsonify({
         "date": day,
         "minutes": minute_map,            # {"636": "YouTube", ...}
@@ -452,6 +464,9 @@ def usage_data():
         "per_app": per_app,               # {"YouTube": 12, ...}
         "colors": colors,                 # {"YouTube": "#e94560", ...}
         "default_color": USAGE_DEFAULT_COLOR,
+        "app_today": app_today,           # [{app, seconds, opens, over_limit}]
+        "focus": focus,                   # {focus_sec, distraction_sec, longest_focus_sec}
+        "mac_week": mac_week,             # {days, apps:[{app, seconds, daily}]}
     })
 
 

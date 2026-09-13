@@ -41,6 +41,29 @@
         }
         .ribbon-title { color: #8a8a9a; font-size: 0.85rem; margin-bottom: 8px; }
         .ribbon-wrap svg { width: 100%; height: auto; display: block; }
+        .cards {
+            margin-top: 20px; display: grid; gap: 14px;
+            grid-template-columns: repeat(3, 1fr);
+        }
+        @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+        .card { background: #16213e; border-radius: 12px; padding: 16px; }
+        .card h2 { color: #00d4ff; font-size: 1.1rem; margin-bottom: 10px; }
+        .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.95rem; }
+        .row.over { color: #e94560; }
+        .row .t { color: #00d4ff; }
+        .row.over .t { color: #e94560; }
+        .row .opens { color: #6a6a78; font-size: 0.8rem; margin-left: 8px; }
+        .fd-bar { height: 12px; border-radius: 6px; overflow: hidden; background: #e94560; margin: 8px 0; }
+        .fd-bar > div { height: 100%; background: #00d4ff; }
+        .muted { color: #8a8a9a; font-size: 0.85rem; }
+        .weekrow { margin-top: 8px; }
+        .weekrow .head { display: flex; justify-content: space-between; font-size: 0.9rem; }
+        .wbars { display: flex; align-items: flex-end; gap: 4px; height: 40px; margin-top: 4px; }
+        .wbars .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+        .wbars .b { width: 100%; background: #00d4ff; border-radius: 3px 3px 0 0; min-height: 3px; }
+        .wbars .b.empty { background: #243056; }
+        .wbars .d { font-size: 0.6rem; color: #6a6a78; margin-top: 2px; }
+        .empty-note { color: #8a8a9a; font-style: italic; }
     </style>
 </head>
 <body>
@@ -59,6 +82,22 @@
     </div>
 
     <div class="grid" id="grid"></div>
+
+    <div class="cards">
+        <div class="card">
+            <h2>App Time - Today</h2>
+            <div id="app-today"></div>
+        </div>
+        <div class="card">
+            <h2>Focus vs Distraction</h2>
+            <div id="focus"></div>
+        </div>
+        <div class="card">
+            <h2>Mac - This Week</h2>
+            <div id="mac-week-card"></div>
+        </div>
+    </div>
+
     <div class="net" id="net"></div>
 
     <script>
@@ -174,6 +213,9 @@
             document.getElementById("total").textContent = d.total_minutes ?? 0;
             renderLegend(d.per_app || {});
             document.getElementById("ribbon").innerHTML = buildRibbon(mins);
+            renderAppToday(d.app_today);
+            renderFocus(d.focus);
+            renderMacWeek(d.mac_week);
 
             const grid = document.getElementById("grid");
             grid.innerHTML = "";
@@ -197,6 +239,58 @@
             ).join("");
             html += `<span><span class="swatch" style="background:#243056"></span>no use</span>`;
             el.innerHTML = html;
+        }
+
+        function fmtDur(s) {
+            const m = Math.floor(s / 60), h = Math.floor(m / 60), mm = m % 60;
+            return h ? `${h}h ${mm}m` : `${mm}m`;
+        }
+        function esc(s) {
+            const dv = document.createElement("div"); dv.textContent = s; return dv.innerHTML;
+        }
+
+        function renderAppToday(list) {
+            const el = document.getElementById("app-today");
+            if (!list || list.length === 0) { el.innerHTML = '<div class="empty-note">None today</div>'; return; }
+            el.innerHTML = list.map(a => {
+                const cls = a.over_limit ? " over" : "";
+                const name = a.app.replace("Mac:", "");
+                return `<div class="row${cls}"><span>${esc(name)}${a.over_limit ? " \u26a0" : ""}</span>`
+                    + `<span><span class="t">${fmtDur(a.seconds)}</span>`
+                    + (a.opens ? `<span class="opens">${a.opens}\u00d7</span>` : "") + `</span></div>`;
+            }).join("");
+        }
+
+        function renderFocus(fs) {
+            const el = document.getElementById("focus");
+            if (!fs || (!fs.focus_sec && !fs.distraction_sec)) {
+                el.innerHTML = '<div class="empty-note">No data yet</div>'; return;
+            }
+            const f = fs.focus_sec, d = fs.distraction_sec, total = f + d || 1;
+            const fpct = Math.round((f / total) * 100);
+            el.innerHTML =
+                `<div class="row"><span style="color:#00d4ff">Focus</span><span class="t">${fmtDur(f)}</span></div>`
+                + `<div class="row over"><span>Distraction</span><span>${fmtDur(d)}</span></div>`
+                + `<div class="fd-bar"><div style="width:${fpct}%"></div></div>`
+                + (fs.longest_focus_sec ? `<div class="muted">Longest focus streak: ${fmtDur(fs.longest_focus_sec)}</div>` : "");
+        }
+
+        function renderMacWeek(mw) {
+            const el = document.getElementById("mac-week-card");
+            if (!mw || !mw.apps || mw.apps.length === 0) {
+                el.innerHTML = '<div class="empty-note">No Mac data this week</div>'; return;
+            }
+            const days = mw.days || [];
+            el.innerHTML = mw.apps.map(a => {
+                const peak = Math.max(1, ...a.daily);
+                const bars = a.daily.map((sec, i) => {
+                    const h = sec > 0 ? Math.max(8, Math.round((sec / peak) * 100)) : 5;
+                    const cls = sec > 0 ? "b" : "b empty";
+                    return `<div class="col"><div class="${cls}" style="height:${h}%"></div><div class="d">${(days[i] || "")[0] || ""}</div></div>`;
+                }).join("");
+                return `<div class="weekrow"><div class="head"><span>${esc(a.app.replace("Mac:", ""))}</span>`
+                    + `<span class="t">${fmtDur(a.seconds)}</span></div><div class="wbars">${bars}</div></div>`;
+            }).join("");
         }
 
         setInterval(refresh, 30000);
