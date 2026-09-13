@@ -35,6 +35,12 @@
         .pie .mins { color: #8a8a9a; font-size: 0.72rem; }
         .pie.active .hr { color: #e94560; font-weight: 600; }
         .net { color: #6a6a78; font-size: 0.85rem; margin-top: 16px; text-align: center; }
+        .ribbon-wrap {
+            background: #16213e; border-radius: 12px; padding: 14px 16px 8px;
+            margin-bottom: 20px;
+        }
+        .ribbon-title { color: #8a8a9a; font-size: 0.85rem; margin-bottom: 8px; }
+        .ribbon-wrap svg { width: 100%; height: auto; display: block; }
     </style>
 </head>
 <body>
@@ -46,6 +52,11 @@
         <div class="total"><span class="v" id="total">--</span> min on phone today</div>
         <div class="legend" id="legend"></div>
     </header>
+
+    <div class="ribbon-wrap">
+        <div class="ribbon-title">Full day &mdash; midnight to midnight</div>
+        <div id="ribbon"></div>
+    </div>
 
     <div class="grid" id="grid"></div>
     <div class="net" id="net"></div>
@@ -99,6 +110,43 @@
             return `${disp}${ampm}`;
         }
 
+        // Build the continuous 24-hour ribbon. `mins` is {minuteOfDay: app}.
+        // The bar is an SVG stretched to full width (1 unit = 1 minute); hour
+        // labels are a separate HTML row below so text isn't distorted by the
+        // horizontal stretch.
+        function buildRibbon(mins) {
+            const W = 1440, BAR = 34;
+            let bars = `<rect x="0" y="0" width="${W}" height="${BAR}" fill="#243056"/>`;
+            Object.keys(mins).forEach(k => {
+                const md = parseInt(k, 10);
+                if (md < 0 || md >= W) return;
+                bars += `<rect x="${md}" y="0" width="1.2" height="${BAR}" `
+                    + `fill="${colorFor(mins[k])}"/>`;
+            });
+            // Hour gridlines inside the bar (thin, uniform).
+            let ticks = "";
+            for (let h = 1; h < 24; h++) {
+                const x = h * 60;
+                ticks += `<line x1="${x}" y1="0" x2="${x}" y2="${BAR}" `
+                    + `stroke="#1a1a2e" stroke-width="0.5"/>`;
+            }
+            const svg = `<svg viewBox="0 0 ${W} ${BAR}" preserveAspectRatio="none" `
+                + `style="height:${BAR}px;border-radius:4px" role="img" `
+                + `aria-label="24-hour usage timeline">${bars}${ticks}</svg>`;
+            // HTML label row: a mark every 3 hours, spaced by percentage so it
+            // lines up with the stretched bar above.
+            let labels = '<div style="position:relative;height:16px;margin-top:2px">';
+            for (let h = 0; h <= 24; h += 3) {
+                const pct = (h / 24) * 100;
+                const align = h === 24 ? "translateX(-100%)" : (h === 0 ? "" : "translateX(-50%)");
+                labels += `<span style="position:absolute;left:${pct}%;`
+                    + `${align ? "transform:" + align + ";" : ""}`
+                    + `font-size:0.72rem;color:#6a6a78">${h === 24 ? "12am" : hourLabel(h)}</span>`;
+            }
+            labels += '</div>';
+            return svg + labels;
+        }
+
         async function refresh() {
             let d;
             try {
@@ -125,6 +173,7 @@
             document.getElementById("date").textContent = d.date || "";
             document.getElementById("total").textContent = d.total_minutes ?? 0;
             renderLegend(d.per_app || {});
+            document.getElementById("ribbon").innerHTML = buildRibbon(mins);
 
             const grid = document.getElementById("grid");
             grid.innerHTML = "";
