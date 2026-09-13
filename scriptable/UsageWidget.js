@@ -85,7 +85,9 @@ async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const w = new ListWidget();
   w.backgroundGradient = bgGradient();
-  w.setPadding(10, 16, 10, 16);
+  // Corner-safe padding: iOS widget corners are ~22pt, so keep content
+  // inset from the curve (esp. horizontally) so nothing clips the corners.
+  w.setPadding(12, 18, 12, 18);
   w.url = `${BASE_URL}/usage`; // tap to open the usage page
 
   const d = await fetchUsage();
@@ -140,9 +142,13 @@ async function buildWidget() {
   // 24-hour ribbon (rounded for legibility).
   const ribbonW = size === "small" ? 130 : 300;
   const ribbonH = size === "small" ? 12 : 16;
-  const img = drawRibbon(d.minutes || {}, colors, defaultColor, ribbonW * 2, ribbonH * 2);
-  const wimg = w.addImage(img);
+  // Draw at high resolution, then let it fill the available width so it always
+  // spans the padded area (no fixed gap that fights the corner insets).
+  const img = drawRibbon(d.minutes || {}, colors, defaultColor, ribbonW * 3, ribbonH * 3);
+  const ribRow = w.addStack();
+  const wimg = ribRow.addImage(img);
   wimg.imageSize = new Size(ribbonW, ribbonH);
+  wimg.applyFillingContentMode();
   wimg.cornerRadius = 5;
 
   // Top apps (medium/large only — small has no room). Trimmed to fit.

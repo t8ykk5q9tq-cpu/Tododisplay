@@ -106,7 +106,9 @@ async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const widget = new ListWidget();
   widget.backgroundGradient = bgGradient();
-  widget.setPadding(14, 16, 14, 16);
+  // Corner-safe padding: iOS widget corners are ~22pt, so keep content
+  // inset from the curve (esp. horizontally) so nothing clips the corners.
+  widget.setPadding(14, 18, 14, 18);
   widget.url = BASE_URL; // tap to open the full web app
 
   const [todo, shopping] = await Promise.all([

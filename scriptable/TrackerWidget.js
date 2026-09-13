@@ -40,7 +40,9 @@ async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const w = new ListWidget();
   w.backgroundGradient = bgGradient();
-  w.setPadding(14, 16, 14, 16);
+  // Corner-safe padding: iOS widget corners are ~22pt, so keep content
+  // inset from the curve (esp. horizontally) so nothing clips the corners.
+  w.setPadding(14, 18, 14, 18);
   w.url = BASE_URL; // tap to open the check-in page
 
   const status = await fetchStatus();
