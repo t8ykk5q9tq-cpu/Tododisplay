@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Usage</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e; color: #eaeaea; min-height: 100vh; padding: 20px;
+        }
+        header {
+            display: flex; align-items: baseline; justify-content: space-between;
+            flex-wrap: wrap; gap: 10px; margin-bottom: 18px;
+        }
+        h1 { color: #00d4ff; font-size: 1.5rem; }
+        .sub { color: #8a8a9a; font-size: 0.9rem; }
+        .total { font-size: 1.1rem; }
+        .total .v { color: #e94560; font-weight: 700; }
+        .legend { display: flex; gap: 16px; font-size: 0.85rem; color: #8a8a9a; align-items: center; }
+        .legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+        .grid {
+            display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px;
+        }
+        @media (max-width: 900px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+        @media (max-width: 600px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 400px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+        .pie {
+            background: #16213e; border-radius: 12px; padding: 10px 6px 6px;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .pie svg { width: 100%; height: auto; display: block; }
+        .pie .hr { color: #eaeaea; font-size: 0.85rem; margin-top: 4px; }
+        .pie .mins { color: #8a8a9a; font-size: 0.72rem; }
+        .pie.active .hr { color: #e94560; font-weight: 600; }
+        .net { color: #6a6a78; font-size: 0.85rem; margin-top: 16px; text-align: center; }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Screen Usage</h1>
+            <div class="sub" id="date">Loading...</div>
+        </div>
+        <div class="total"><span class="v" id="total">--</span> min on phone today</div>
+        <div class="legend">
+            <span><span class="swatch" style="background:#e94560"></span>phone used</span>
+            <span><span class="swatch" style="background:#243056"></span>no use</span>
+        </div>
+    </header>
+
+    <div class="grid" id="grid"></div>
+    <div class="net" id="net"></div>
+
+    <script>
+        const R = 46;         // outer radius
+        const CX = 50, CY = 50;
+        const USED = "#e94560";
+        const IDLE = "#243056";
+        const HUB = "#16213e";
+
+        // Point on the circle for a given minute (0..60), 0 = top (12 o'clock),
+        // clockwise. Returns [x, y].
+        function pt(minute, radius) {
+            const ang = (minute / 60) * 2 * Math.PI - Math.PI / 2;
+            return [CX + radius * Math.cos(ang), CY + radius * Math.sin(ang)];
+        }
+
+        // Build one hour's pie as an SVG string. `usedSet` is a Set of
+        // minute-of-hour (0..59) that were active.
+        function buildPie(hour, usedSet) {
+            let wedges = "";
+            for (let m = 0; m < 60; m++) {
+                const [x1, y1] = pt(m, R);
+                const [x2, y2] = pt(m + 1, R);
+                const color = usedSet.has(m) ? USED : IDLE;
+                // wedge: center -> edge(m) -> arc -> edge(m+1) -> close
+                wedges += `<path d="M${CX},${CY} L${x1.toFixed(2)},${y1.toFixed(2)} `
+                    + `A${R},${R} 0 0 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" `
+                    + `fill="${color}" stroke="#16213e" stroke-width="0.4"/>`;
+            }
+            // small hub circle for a clean center
+            const hub = `<circle cx="${CX}" cy="${CY}" r="8" fill="${HUB}"/>`;
+            const label = String(hour).padStart(2, "0");
+            return `<svg viewBox="0 0 100 100" role="img" aria-label="Hour ${label}">`
+                + wedges + hub
+                + `<text x="${CX}" y="${CY + 3}" text-anchor="middle" `
+                + `font-size="12" fill="#8a8a9a">${label}</text></svg>`;
+        }
+
+        function hourLabel(h) {
+            const ampm = h < 12 ? "am" : "pm";
+            let disp = h % 12; if (disp === 0) disp = 12;
+            return `${disp}${ampm}`;
+        }
+
+        async function refresh() {
+            let d;
+            try {
+                d = await (await fetch("/usage-data", { cache: "no-store" })).json();
+                document.getElementById("net").textContent = "";
+            } catch (e) {
+                document.getElementById("net").textContent = "Offline - retrying...";
+                return;
+            }
+
+            // Group active minute-of-day into per-hour sets of minute-of-hour.
+            const byHour = Array.from({ length: 24 }, () => new Set());
+            (d.minutes || []).forEach(md => {
+                const h = Math.floor(md / 60), m = md % 60;
+                if (h >= 0 && h < 24) byHour[h].add(m);
+            });
+
+            document.getElementById("date").textContent = d.date || "";
+            document.getElementById("total").textContent = d.total_minutes ?? 0;
+
+            const grid = document.getElementById("grid");
+            grid.innerHTML = "";
+            for (let h = 0; h < 24; h++) {
+                const used = byHour[h];
+                const cell = document.createElement("div");
+                cell.className = "pie" + (used.size ? " active" : "");
+                cell.innerHTML = buildPie(h, used)
+                    + `<div class="hr">${hourLabel(h)}</div>`
+                    + `<div class="mins">${used.size ? used.size + " min" : "-"}</div>`;
+                grid.appendChild(cell);
+            }
+        }
+
+        setInterval(refresh, 30000);
+        refresh();
+    </script>
+</body>
+</html>

@@ -52,6 +52,7 @@ SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water glasses per day
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")  # daily numeric metric (weight)
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")  # one line per day
+USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")  # active minute-of-day indices per date
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 # ======================================================================
@@ -403,6 +404,25 @@ def index():
     return render_template("tracker.html")
 
 
+@app.route("/usage")
+def usage_page():
+    """Screen-usage clock page: 24 hourly pies, 60 minute-segments each."""
+    return render_template("usage.html")
+
+
+@app.route("/usage-data")
+def usage_data():
+    """Return the active minute-of-day list for a date (default today), plus a
+    small summary. Usage: /usage-data or /usage-data?date=YYYY-MM-DD."""
+    day = request.args.get("date") or date.today().isoformat()
+    minutes = sorted(set(load_usage_minutes().get(day, [])))
+    return jsonify({
+        "date": day,
+        "minutes": minutes,               # minute-of-day indices (0..1439)
+        "total_minutes": len(minutes),    # total minutes with phone use
+    })
+
+
 @app.route("/log", methods=["GET"])
 def get_log():
     return jsonify(load_log())
@@ -506,6 +526,45 @@ def normalize_app_name(raw):
     return _CANON_APPS.get(key.lower(), key)
 
 
+def load_usage_minutes():
+    """Return {'YYYY-MM-DD': [minute_of_day, ...]} of minutes with phone use."""
+    if os.path.exists(USAGE_MIN_FILE):
+        try:
+            with open(USAGE_MIN_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_usage_minutes(data):
+    with open(USAGE_MIN_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def mark_usage_minute(when=None):
+    """Record the given datetime's minute-of-day (0..1439) as 'phone used' for
+    that date. Called whenever a tracked (distraction) app is active. Keeps at
+    most ~60 days of history. No-op-safe on file errors."""
+    when = when or datetime.now()
+    day = when.date().isoformat()
+    minute = when.hour * 60 + when.minute
+    try:
+        data = load_usage_minutes()
+        mins = set(data.get(day, []))
+        if minute in mins:
+            return  # already recorded this minute
+        mins.add(minute)
+        data[day] = sorted(mins)
+        # prune old days
+        if len(data) > 60:
+            for old in sorted(data)[:-60]:
+                data.pop(old, None)
+        save_usage_minutes(data)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
 def check_app_limit(data, app_name, today):
     """Fire one Pushover per app per day when today's total crosses the limit.
     Returns True if an alert was sent. Mutates `data` (records 'alerted')."""
@@ -559,6 +618,9 @@ def app_start():
     data.setdefault("opens", {}).setdefault(today, {})
     data["opens"][today][app_name] = data["opens"][today].get(app_name, 0) + 1
     save_appuse(data)
+    # Stamp this minute as phone-used (for the screen-usage clock page).
+    if classify_app(app_name) == "distraction":
+        mark_usage_minute()
     return _tiny_page(f"Started: {app_name}")
 
 
@@ -587,6 +649,14 @@ def app_stop():
     total_today = data.get("totals", {}).get(today, {}).get(app_name, 0)
     crossed_limit = check_app_limit(data, app_name, today)
     save_appuse(data)
+    # Stamp every minute this session spanned as phone-used (covers short
+    # sessions the minute-thread may not have caught).
+    if classify_app(app_name) == "distraction" and 0 < elapsed <= MAX_SESSION_SEC:
+        span = min(elapsed, MAX_SESSION_SEC)
+        step = start
+        while step <= start + span:
+            mark_usage_minute(datetime.fromtimestamp(step))
+            step += 60
     mins = max(1, elapsed // 60)
     suffix = "  (limit reached!)" if crossed_limit else ""
     return _tiny_page(f"{app_name}: +{mins}m{suffix}")
@@ -1268,6 +1338,9 @@ def session_credit_thread():
                     credited[app_name] = capped
                     check_app_limit(data, app_name, today)
                     changed = True
+                    # Stamp the current minute as phone-used for the usage page.
+                    if classify_app(app_name) == "distraction":
+                        mark_usage_minute()
                 # Auto-close a session that has run past the cap.
                 if elapsed >= MAX_SESSION_SEC:
                     open_sessions.pop(app_name, None)
