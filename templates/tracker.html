@@ -176,7 +176,7 @@
         <div class="recent-title">Water (1 L bottles)</div>
         <div class="water-row">
             <button class="water-btn" id="water-minus">&minus;</button>
-            <div class="water-count"><span class="g" id="water-glasses">0</span>
+            <div class="water-count"><span class="g" id="water-bottles">0</span>
                 <span id="water-goal"></span></div>
             <button class="water-btn" id="water-plus">+</button>
         </div>
@@ -355,7 +355,7 @@
         }
         function renderWater(w) {
             if (!w) return;
-            document.getElementById("water-glasses").textContent = fmtBottles(w.bottles);
+            document.getElementById("water-bottles").textContent = fmtBottles(w.bottles);
             document.getElementById("water-goal").textContent = "/ " + w.goal + " bottles";
             const fill = document.getElementById("water-fill");
             fill.style.width = w.percent + "%";
