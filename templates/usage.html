@@ -44,10 +44,7 @@
             <div class="sub" id="date">Loading...</div>
         </div>
         <div class="total"><span class="v" id="total">--</span> min on phone today</div>
-        <div class="legend">
-            <span><span class="swatch" style="background:#e94560"></span>phone used</span>
-            <span><span class="swatch" style="background:#243056"></span>no use</span>
-        </div>
+        <div class="legend" id="legend"></div>
     </header>
 
     <div class="grid" id="grid"></div>
@@ -56,9 +53,15 @@
     <script>
         const R = 46;         // outer radius
         const CX = 50, CY = 50;
-        const USED = "#e94560";
         const IDLE = "#243056";
         const HUB = "#16213e";
+        let COLORS = {};              // app -> hex, from the API
+        let DEFAULT_COLOR = "#9b6dff";
+
+        function colorFor(app) {
+            if (!app) return DEFAULT_COLOR;      // used, app unknown (legacy)
+            return COLORS[app] || DEFAULT_COLOR;
+        }
 
         // Point on the circle for a given minute (0..60), 0 = top (12 o'clock),
         // clockwise. Returns [x, y].
@@ -67,14 +70,15 @@
             return [CX + radius * Math.cos(ang), CY + radius * Math.sin(ang)];
         }
 
-        // Build one hour's pie as an SVG string. `usedSet` is a Set of
-        // minute-of-hour (0..59) that were active.
-        function buildPie(hour, usedSet) {
+        // Build one hour's pie as an SVG string. `hourApps` maps
+        // minute-of-hour (0..59) -> app name (or "" if used-but-unknown).
+        function buildPie(hour, hourApps) {
             let wedges = "";
             for (let m = 0; m < 60; m++) {
                 const [x1, y1] = pt(m, R);
                 const [x2, y2] = pt(m + 1, R);
-                const color = usedSet.has(m) ? USED : IDLE;
+                const app = hourApps[m];
+                const color = (app === undefined) ? IDLE : colorFor(app);
                 // wedge: center -> edge(m) -> arc -> edge(m+1) -> close
                 wedges += `<path d="M${CX},${CY} L${x1.toFixed(2)},${y1.toFixed(2)} `
                     + `A${R},${R} 0 0 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" `
@@ -105,27 +109,45 @@
                 return;
             }
 
-            // Group active minute-of-day into per-hour sets of minute-of-hour.
-            const byHour = Array.from({ length: 24 }, () => new Set());
-            (d.minutes || []).forEach(md => {
+            COLORS = d.colors || {};
+            DEFAULT_COLOR = d.default_color || DEFAULT_COLOR;
+
+            // Group minute-of-day -> app into per-hour maps {minuteOfHour: app}.
+            const byHour = Array.from({ length: 24 }, () => ({}));
+            const counts = new Array(24).fill(0);
+            const mins = d.minutes || {};
+            Object.keys(mins).forEach(k => {
+                const md = parseInt(k, 10);
                 const h = Math.floor(md / 60), m = md % 60;
-                if (h >= 0 && h < 24) byHour[h].add(m);
+                if (h >= 0 && h < 24) { byHour[h][m] = mins[k]; counts[h]++; }
             });
 
             document.getElementById("date").textContent = d.date || "";
             document.getElementById("total").textContent = d.total_minutes ?? 0;
+            renderLegend(d.per_app || {});
 
             const grid = document.getElementById("grid");
             grid.innerHTML = "";
             for (let h = 0; h < 24; h++) {
-                const used = byHour[h];
                 const cell = document.createElement("div");
-                cell.className = "pie" + (used.size ? " active" : "");
-                cell.innerHTML = buildPie(h, used)
+                cell.className = "pie" + (counts[h] ? " active" : "");
+                cell.innerHTML = buildPie(h, byHour[h])
                     + `<div class="hr">${hourLabel(h)}</div>`
-                    + `<div class="mins">${used.size ? used.size + " min" : "-"}</div>`;
+                    + `<div class="mins">${counts[h] ? counts[h] + " min" : "-"}</div>`;
                 grid.appendChild(cell);
             }
+        }
+
+        function renderLegend(perApp) {
+            const el = document.getElementById("legend");
+            // Sort apps by minutes desc; keep "no use" swatch at the end.
+            const apps = Object.keys(perApp).sort((a, b) => perApp[b] - perApp[a]);
+            let html = apps.map(a =>
+                `<span><span class="swatch" style="background:${colorFor(a === "Other" ? "" : a)}"></span>`
+                + `${a} <span style="color:#6a6a78">${perApp[a]}m</span></span>`
+            ).join("");
+            html += `<span><span class="swatch" style="background:#243056"></span>no use</span>`;
+            el.innerHTML = html;
         }
 
         setInterval(refresh, 30000);

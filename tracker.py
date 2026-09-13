@@ -410,16 +410,48 @@ def usage_page():
     return render_template("usage.html")
 
 
+# Distinct colors per tracked app for the usage clock. Unknown/older entries
+# (recorded before per-app tracking) fall back to USAGE_DEFAULT_COLOR.
+USAGE_APP_COLORS = {
+    "YouTube": "#e94560",   # red
+    "TikTok": "#00d4ff",    # cyan
+    "Instagram": "#c13584", # magenta
+    "Twitter": "#1da1f2",
+    "X": "#1da1f2",
+    "Reddit": "#ff5700",
+    "Snapchat": "#f5d90a",
+}
+USAGE_DEFAULT_COLOR = "#9b6dff"  # violet: used, but app unknown
+
+
 @app.route("/usage-data")
 def usage_data():
-    """Return the active minute-of-day list for a date (default today), plus a
-    small summary. Usage: /usage-data or /usage-data?date=YYYY-MM-DD."""
+    """Return per-minute app usage for a date (default today) plus the color
+    map. Usage: /usage-data or /usage-data?date=YYYY-MM-DD.
+    'minutes' maps minute-of-day (as string) -> app name (may be '')."""
     day = request.args.get("date") or date.today().isoformat()
-    minutes = sorted(set(load_usage_minutes().get(day, [])))
+    raw = load_usage_minutes().get(day, {})
+    # Support the legacy list format (bare minute indices, no app).
+    if isinstance(raw, list):
+        minute_map = {str(m): "" for m in raw}
+    elif isinstance(raw, dict):
+        minute_map = raw
+    else:
+        minute_map = {}
+    # Per-app totals for the legend.
+    per_app = {}
+    for app_name in minute_map.values():
+        key = app_name or "Other"
+        per_app[key] = per_app.get(key, 0) + 1
+    colors = dict(USAGE_APP_COLORS)
+    colors["Other"] = USAGE_DEFAULT_COLOR
     return jsonify({
         "date": day,
-        "minutes": minutes,               # minute-of-day indices (0..1439)
-        "total_minutes": len(minutes),    # total minutes with phone use
+        "minutes": minute_map,            # {"636": "YouTube", ...}
+        "total_minutes": len(minute_map),
+        "per_app": per_app,               # {"YouTube": 12, ...}
+        "colors": colors,                 # {"YouTube": "#e94560", ...}
+        "default_color": USAGE_DEFAULT_COLOR,
     })
 
 
@@ -542,20 +574,23 @@ def save_usage_minutes(data):
         json.dump(data, f)
 
 
-def mark_usage_minute(when=None):
-    """Record the given datetime's minute-of-day (0..1439) as 'phone used' for
-    that date. Called whenever a tracked (distraction) app is active. Keeps at
-    most ~60 days of history. No-op-safe on file errors."""
+def mark_usage_minute(app, when=None):
+    """Record that `app` was used during the given datetime's minute-of-day
+    (0..1439) for that date. Stored as {date: {minute: app}} with last-wins on
+    same-minute app switches. Keeps ~60 days of history. No-op-safe on errors."""
     when = when or datetime.now()
     day = when.date().isoformat()
-    minute = when.hour * 60 + when.minute
+    minute = str(when.hour * 60 + when.minute)  # JSON keys must be strings
     try:
         data = load_usage_minutes()
-        mins = set(data.get(day, []))
-        if minute in mins:
-            return  # already recorded this minute
-        mins.add(minute)
-        data[day] = sorted(mins)
+        day_map = data.get(day)
+        # Migrate an old-format day (a bare list of minutes) to the new map.
+        if isinstance(day_map, list):
+            day_map = {str(m): "" for m in day_map}
+        elif not isinstance(day_map, dict):
+            day_map = {}
+        day_map[minute] = app  # last-wins
+        data[day] = day_map
         # prune old days
         if len(data) > 60:
             for old in sorted(data)[:-60]:
@@ -620,7 +655,7 @@ def app_start():
     save_appuse(data)
     # Stamp this minute as phone-used (for the screen-usage clock page).
     if classify_app(app_name) == "distraction":
-        mark_usage_minute()
+        mark_usage_minute(app_name)
     return _tiny_page(f"Started: {app_name}")
 
 
@@ -655,7 +690,7 @@ def app_stop():
         span = min(elapsed, MAX_SESSION_SEC)
         step = start
         while step <= start + span:
-            mark_usage_minute(datetime.fromtimestamp(step))
+            mark_usage_minute(app_name, datetime.fromtimestamp(step))
             step += 60
     mins = max(1, elapsed // 60)
     suffix = "  (limit reached!)" if crossed_limit else ""
@@ -1340,7 +1375,7 @@ def session_credit_thread():
                     changed = True
                     # Stamp the current minute as phone-used for the usage page.
                     if classify_app(app_name) == "distraction":
-                        mark_usage_minute()
+                        mark_usage_minute(app_name)
                 # Auto-close a session that has run past the cap.
                 if elapsed >= MAX_SESSION_SEC:
                     open_sessions.pop(app_name, None)
