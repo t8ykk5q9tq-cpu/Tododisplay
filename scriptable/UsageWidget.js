@@ -34,6 +34,10 @@ async function fetchUsage() {
 
 // Draw a mini 24-hour ribbon colored by app, with faint hour gridlines and a
 // subtle "now" marker so it reads clearly at a glance.
+// Draw a zoomed-in ribbon of the LAST `windowMin` minutes (default 120 = 2h),
+// ending at the current minute. Each minute is wide enough to actually see.
+const RIBBON_WINDOW_MIN = 120; // last 2 hours
+
 function drawRibbon(minutes, colors, defaultColor, width, height) {
   const ctx = new DrawContext();
   ctx.size = new Size(width, height);
@@ -44,31 +48,34 @@ function drawRibbon(minutes, colors, defaultColor, width, height) {
   ctx.setFillColor(new Color("#20263f"));
   ctx.fillRect(new Rect(0, 0, width, height));
 
-  const perMin = width / 1440; // px per minute of day
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const startMin = nowMin - RIBBON_WINDOW_MIN + 1; // window is [startMin .. nowMin]
+  const perMin = width / RIBBON_WINDOW_MIN;         // px per minute in the window
 
-  // faint hour gridlines every 3 hours
+  // faint gridlines every 30 min within the window
   ctx.setFillColor(new Color("#2f3856"));
-  for (let h = 3; h < 24; h += 3) {
-    const x = h * 60 * perMin;
-    ctx.fillRect(new Rect(x, 0, 1, height));
+  for (let m = startMin; m <= nowMin; m++) {
+    if (((m % 60) + 60) % 60 === 0 || ((m % 60) + 60) % 60 === 30) {
+      const x = (m - startMin) * perMin;
+      ctx.fillRect(new Rect(x, 0, 1, height));
+    }
   }
 
-  // used minutes, colored by app (drawn a touch taller-feeling via full height)
+  // used minutes within the window, colored by app
   for (const key of Object.keys(minutes)) {
     const md = parseInt(key, 10);
-    if (md < 0 || md >= 1440) continue;
+    if (md < startMin || md > nowMin) continue; // only the last 2 hours
     const app = minutes[key];
     const hex = (app && colors[app]) ? colors[app] : defaultColor;
     ctx.setFillColor(new Color(hex));
-    const x = md * perMin;
-    ctx.fillRect(new Rect(x, 0, Math.max(1.5, perMin + 0.5), height));
+    const x = (md - startMin) * perMin;
+    ctx.fillRect(new Rect(x, 0, Math.max(2, perMin), height));
   }
 
-  // "now" marker (thin white line at the current minute of day)
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
+  // "now" marker at the right edge (end of the window)
   ctx.setFillColor(new Color("#ffffff", 0.85));
-  ctx.fillRect(new Rect(nowMin * perMin, 0, 1.5, height));
+  ctx.fillRect(new Rect(width - 2, 0, 2, height));
 
   return ctx.getImage();
 }
@@ -137,13 +144,11 @@ async function buildWidget() {
   unit.textColor = MUTED;
   bigRow.addSpacer(2);
 
-  w.addSpacer(6);
+  w.addSpacer(5);
 
-  // 24-hour ribbon (rounded for legibility).
+  // Zoomed ribbon: last 2 hours (taller now that each minute is wide).
   const ribbonW = size === "small" ? 130 : 300;
-  const ribbonH = size === "small" ? 12 : 16;
-  // Draw at high resolution, then let it fill the available width so it always
-  // spans the padded area (no fixed gap that fights the corner insets).
+  const ribbonH = size === "small" ? 16 : 22;
   const img = drawRibbon(d.minutes || {}, colors, defaultColor, ribbonW * 3, ribbonH * 3);
   const ribRow = w.addStack();
   const wimg = ribRow.addImage(img);
@@ -151,9 +156,25 @@ async function buildWidget() {
   wimg.applyFillingContentMode();
   wimg.cornerRadius = 5;
 
+  // Window axis with the used-minutes count in the middle: "2h ago … Xm … now".
+  const now2 = new Date();
+  const nowMin2 = now2.getHours() * 60 + now2.getMinutes();
+  const startMin2 = nowMin2 - 120 + 1;
+  let winUsed = 0;
+  for (const k of Object.keys(d.minutes || {})) {
+    const md = parseInt(k, 10);
+    if (md >= startMin2 && md <= nowMin2) winUsed++;
+  }
+  const axis = w.addStack();
+  const aL = axis.addText("2h ago"); aL.font = Font.systemFont(8); aL.textColor = MUTED;
+  axis.addSpacer();
+  const aM = axis.addText(`${winUsed}m in last 2h`); aM.font = Font.systemFont(8); aM.textColor = MUTED;
+  axis.addSpacer();
+  const aR = axis.addText("now"); aR.font = Font.systemFont(8); aR.textColor = MUTED;
+
   // Top apps (medium/large only — small has no room). Trimmed to fit.
   if (size !== "small") {
-    w.addSpacer(6);
+    w.addSpacer(5);
     const apps = Object.keys(perApp).sort((a, b) => perApp[b] - perApp[a]);
     const maxRows = size === "large" ? 6 : 2;
     if (apps.length === 0) {
