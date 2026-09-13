@@ -29,19 +29,34 @@ async function fetchStatus() {
   }
 }
 
+function bgGradient() {
+  const g = new LinearGradient();
+  g.colors = [new Color("#1e2340"), new Color("#161a2e")];
+  g.locations = [0, 1];
+  return g;
+}
+
 async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const w = new ListWidget();
-  w.backgroundColor = BG;
+  w.backgroundGradient = bgGradient();
   w.setPadding(14, 16, 14, 16);
   w.url = BASE_URL; // tap to open the check-in page
 
   const status = await fetchStatus();
 
-  // Header
-  const header = w.addText("Time Tracker");
-  header.font = Font.boldSystemFont(13);
+  // Header row: title left, awake/asleep chip right.
+  const head = w.addStack();
+  head.centerAlignContent();
+  const header = head.addText("Time Tracker");
+  header.font = Font.boldSystemFont(14);
   header.textColor = ACCENT;
+  head.addSpacer();
+  if (status) {
+    const chip = head.addText(status.is_awake ? "awake" : "sleeping");
+    chip.font = Font.systemFont(10);
+    chip.textColor = status.is_awake ? MUTED : new Color("#6a7290");
+  }
   w.addSpacer(8);
 
   if (status === null) {
@@ -120,11 +135,16 @@ async function buildWidget() {
       none.textColor = MUTED;
     } else {
       for (const e of earlier.slice(0, maxRows)) {
-        const t = right.addText(`${fmtTime(e.timestamp)}  ${e.text}`);
-        t.font = Font.systemFont(11);
-        t.textColor = WHITE;
-        t.lineLimit = 1;
-        right.addSpacer(3);
+        const r = right.addStack();
+        r.spacing = 6;
+        const tm = r.addText(fmtTime(e.timestamp));
+        tm.font = Font.regularMonospacedSystemFont(10.5);
+        tm.textColor = ACCENT;
+        const tx = r.addText(e.text);
+        tx.font = Font.systemFont(11);
+        tx.textColor = WHITE;
+        tx.lineLimit = 1;
+        right.addSpacer(4);
       }
     }
   }

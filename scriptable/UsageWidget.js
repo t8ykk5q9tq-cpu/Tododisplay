@@ -32,18 +32,28 @@ async function fetchUsage() {
   }
 }
 
-// Draw a mini 24-hour ribbon (1 px per ~few minutes) colored by app.
+// Draw a mini 24-hour ribbon colored by app, with faint hour gridlines and a
+// subtle "now" marker so it reads clearly at a glance.
 function drawRibbon(minutes, colors, defaultColor, width, height) {
   const ctx = new DrawContext();
   ctx.size = new Size(width, height);
   ctx.opaque = false;
   ctx.respectScreenScale = true;
 
-  // idle base
-  ctx.setFillColor(PANEL);
+  // idle base (dark, clearly distinct from used minutes)
+  ctx.setFillColor(new Color("#20263f"));
   ctx.fillRect(new Rect(0, 0, width, height));
 
   const perMin = width / 1440; // px per minute of day
+
+  // faint hour gridlines every 3 hours
+  ctx.setFillColor(new Color("#2f3856"));
+  for (let h = 3; h < 24; h += 3) {
+    const x = h * 60 * perMin;
+    ctx.fillRect(new Rect(x, 0, 1, height));
+  }
+
+  // used minutes, colored by app (drawn a touch taller-feeling via full height)
   for (const key of Object.keys(minutes)) {
     const md = parseInt(key, 10);
     if (md < 0 || md >= 1440) continue;
@@ -51,24 +61,51 @@ function drawRibbon(minutes, colors, defaultColor, width, height) {
     const hex = (app && colors[app]) ? colors[app] : defaultColor;
     ctx.setFillColor(new Color(hex));
     const x = md * perMin;
-    ctx.fillRect(new Rect(x, 0, Math.max(1, perMin), height));
+    ctx.fillRect(new Rect(x, 0, Math.max(1.5, perMin + 0.5), height));
   }
+
+  // "now" marker (thin white line at the current minute of day)
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  ctx.setFillColor(new Color("#ffffff", 0.85));
+  ctx.fillRect(new Rect(nowMin * perMin, 0, 1.5, height));
+
   return ctx.getImage();
+}
+
+// A gradient background shared by all polished widgets, for a bit of depth.
+function bgGradient() {
+  const g = new LinearGradient();
+  g.colors = [new Color("#1e2340"), new Color("#161a2e")];
+  g.locations = [0, 1];
+  return g;
 }
 
 async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const w = new ListWidget();
-  w.backgroundColor = BG;
+  w.backgroundGradient = bgGradient();
   w.setPadding(14, 16, 14, 16);
   w.url = `${BASE_URL}/usage`; // tap to open the usage page
 
-  const header = w.addText("Screen Usage");
-  header.font = Font.boldSystemFont(13);
-  header.textColor = ACCENT;
-  w.addSpacer(6);
-
   const d = await fetchUsage();
+
+  // Header row: title left, date chip right.
+  const head = w.addStack();
+  head.centerAlignContent();
+  const header = head.addText("Screen Usage");
+  header.font = Font.boldSystemFont(14);
+  header.textColor = ACCENT;
+  head.addSpacer();
+  if (d) {
+    const now = new Date();
+    const chip = head.addText(
+      now.toLocaleDateString([], { month: "short", day: "numeric" }));
+    chip.font = Font.systemFont(10);
+    chip.textColor = MUTED;
+  }
+  w.addSpacer(8);
+
   if (d === null) {
     const err = w.addText("Can't reach Pi");
     err.font = Font.systemFont(12);
@@ -83,28 +120,40 @@ async function buildWidget() {
   const perApp = d.per_app || {};
   const colors = d.colors || {};
   const defaultColor = d.default_color || "#9b6dff";
+  const totalH = Math.floor(total / 60), totalM = total % 60;
+  const totalStr = totalH ? `${totalH}h ${totalM}m` : `${total}m`;
 
-  // Big number: today's phone minutes.
+  // Big number: today's phone time, with a baseline-aligned unit.
   const bigRow = w.addStack();
-  bigRow.centerAlignContent();
-  const big = bigRow.addText(String(total));
-  big.font = Font.boldSystemFont(size === "small" ? 30 : 36);
+  bigRow.bottomAlignContent();
+  const big = bigRow.addText(totalStr);
+  big.font = Font.boldSystemFont(size === "small" ? 26 : 34);
   big.textColor = total > 0 ? ALERT : MUTED;
-  bigRow.addSpacer(6);
-  const unit = bigRow.addText("min on phone");
+  bigRow.addSpacer(7);
+  const unit = bigRow.addText("on phone today");
   unit.font = Font.systemFont(12);
   unit.textColor = MUTED;
+  bigRow.addSpacer(2);
 
-  w.addSpacer(8);
+  w.addSpacer(9);
 
-  // Mini ribbon.
+  // 24-hour ribbon (taller + rounded for legibility).
   const ribbonW = size === "small" ? 130 : 300;
-  const ribbonH = 16;
-  const img = drawRibbon(d.minutes || {}, colors, defaultColor, ribbonW, ribbonH);
-  const imgStack = w.addStack();
-  const wimg = imgStack.addImage(img);
+  const ribbonH = size === "small" ? 14 : 20;
+  const img = drawRibbon(d.minutes || {}, colors, defaultColor, ribbonW * 2, ribbonH * 2);
+  const wimg = w.addImage(img);
   wimg.imageSize = new Size(ribbonW, ribbonH);
-  wimg.cornerRadius = 4;
+  wimg.cornerRadius = 5;
+
+  // Ribbon axis labels (12a / 12p / 12a) on medium+.
+  if (size !== "small") {
+    const axis = w.addStack();
+    const a1 = axis.addText("12a"); a1.font = Font.systemFont(8); a1.textColor = MUTED;
+    axis.addSpacer();
+    const a2 = axis.addText("12p"); a2.font = Font.systemFont(8); a2.textColor = MUTED;
+    axis.addSpacer();
+    const a3 = axis.addText("12a"); a3.font = Font.systemFont(8); a3.textColor = MUTED;
+  }
 
   // Top apps (medium/large only — small has no room).
   if (size !== "small") {
@@ -119,20 +168,19 @@ async function buildWidget() {
       for (const a of apps.slice(0, maxRows)) {
         const row = w.addStack();
         row.centerAlignContent();
-        // color dot
         const dotHex = (a === "Other") ? defaultColor : (colors[a] || defaultColor);
         const dot = row.addText("\u25CF");
-        dot.font = Font.systemFont(10);
+        dot.font = Font.systemFont(11);
         dot.textColor = new Color(dotHex);
-        row.addSpacer(6);
+        row.addSpacer(7);
         const name = row.addText(a);
-        name.font = Font.systemFont(12);
+        name.font = Font.mediumSystemFont(13);
         name.textColor = WHITE;
         row.addSpacer();
         const mins = row.addText(`${perApp[a]}m`);
-        mins.font = Font.mediumSystemFont(12);
+        mins.font = Font.semiboldSystemFont(13);
         mins.textColor = MUTED;
-        w.addSpacer(3);
+        w.addSpacer(5);
       }
     }
   }

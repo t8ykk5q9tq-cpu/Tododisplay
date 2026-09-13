@@ -47,15 +47,15 @@ function buildColumn(container, title, items, maxRows, fontSize) {
   const head = col.addStack();
   head.centerAlignContent();
   const titleTxt = head.addText(title);
-  titleTxt.font = Font.boldSystemFont(fontSize + 2);
+  titleTxt.font = Font.boldSystemFont(14);
   titleTxt.textColor = ACCENT;
   head.addSpacer();
   if (items && items.length) {
     const count = head.addText(String(items.length));
-    count.font = Font.mediumSystemFont(fontSize);
-    count.textColor = MUTED;
+    count.font = Font.semiboldSystemFont(fontSize);
+    count.textColor = ACCENT;
   }
-  col.addSpacer(5);
+  col.addSpacer(6);
 
   if (items === null) {
     const err = col.addText("Can't reach Pi");
@@ -95,10 +95,17 @@ function buildColumn(container, title, items, maxRows, fontSize) {
   }
 }
 
+function bgGradient() {
+  const g = new LinearGradient();
+  g.colors = [new Color("#1e2340"), new Color("#161a2e")];
+  g.locations = [0, 1];
+  return g;
+}
+
 async function buildWidget() {
   const size = config.widgetFamily || "medium";
   const widget = new ListWidget();
-  widget.backgroundColor = BG;
+  widget.backgroundGradient = bgGradient();
   widget.setPadding(14, 16, 14, 16);
   widget.url = BASE_URL; // tap to open the full web app
 
