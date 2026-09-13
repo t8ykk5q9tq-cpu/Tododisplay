@@ -350,13 +350,16 @@
             renderWater(await r.json());
         }
 
+        function fmtBottles(n) {
+            return Number(n).toFixed(1).replace(/\.0$/, "");
+        }
         function renderWater(w) {
             if (!w) return;
-            document.getElementById("water-glasses").textContent = w.glasses;
+            document.getElementById("water-glasses").textContent = fmtBottles(w.bottles);
             document.getElementById("water-goal").textContent = "/ " + w.goal + " bottles";
             const fill = document.getElementById("water-fill");
             fill.style.width = w.percent + "%";
-            fill.classList.toggle("full", w.glasses >= w.goal);
+            fill.classList.toggle("full", w.bottles >= w.goal);
         }
 
         function renderMetric(m) {
@@ -618,8 +621,8 @@
             refresh();
         });
 
-        document.getElementById("water-plus").addEventListener("click", () => logWater(1));
-        document.getElementById("water-minus").addEventListener("click", () => logWater(-1));
+        document.getElementById("water-plus").addEventListener("click", () => logWater(0.5));
+        document.getElementById("water-minus").addEventListener("click", () => logWater(-0.5));
         document.getElementById("journal-form").addEventListener("submit", async (e) => {
             e.preventDefault();
             const inp = document.getElementById("journal-input");

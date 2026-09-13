@@ -261,10 +261,11 @@
         function renderWater(w) {
             const el = $("water");
             if (!w) { el.innerHTML = '<div class="empty">No data</div>'; return; }
-            const full = w.glasses >= w.goal;
+            const full = w.bottles >= w.goal;
+            const b = Number(w.bottles).toFixed(1).replace(/\.0$/, "");
             el.innerHTML =
                 `<div class="stat-row"><span>Today</span>` +
-                `<span class="v">${w.glasses} / ${w.goal} bottles</span></div>` +
+                `<span class="v">${b} / ${w.goal} bottles</span></div>` +
                 `<div class="wbar-track"><div class="wbar-fill ${full ? "full" : ""}" style="width:${w.percent}%"></div></div>` +
                 (full ? '<div class="sub good">Goal reached \u2713</div>' : "");
         }

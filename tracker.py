@@ -835,7 +835,7 @@ def log_mood():
 
 
 def load_water():
-    """Return {'YYYY-MM-DD': glasses} dict."""
+    """Return {'YYYY-MM-DD': bottles} dict (bottles may be fractional)."""
     if os.path.exists(WATER_FILE):
         try:
             with open(WATER_FILE) as f:
@@ -851,28 +851,29 @@ def save_water(data):
 
 
 def water_today():
-    """Return {'glasses', 'goal', 'percent'} for today."""
+    """Return {'bottles', 'goal', 'percent'} for today (bottles may be .5)."""
     data = load_water()
-    glasses = int(data.get(date.today().isoformat(), 0))
-    pct = min(100, int(round((glasses / WATER_GOAL) * 100))) if WATER_GOAL else 0
-    return {"glasses": glasses, "goal": WATER_GOAL, "percent": pct}
+    bottles = float(data.get(date.today().isoformat(), 0) or 0)
+    pct = min(100, int(round((bottles / WATER_GOAL) * 100))) if WATER_GOAL else 0
+    return {"bottles": round(bottles, 1), "goal": WATER_GOAL, "percent": pct}
 
 
 @app.route("/water", methods=["GET", "POST"])
 def log_water():
-    """Adjust today's water count. /water?delta=1 adds a bottle, delta=-1 undoes.
-    GET so a bookmark/Shortcut works; POST also accepted."""
+    """Adjust today's water in 1 L bottles. /water?delta=0.5 adds half a bottle,
+    delta=-0.5 undoes. GET so a bookmark/Shortcut works; POST also accepted."""
     if request.method == "POST":
-        delta = (request.get_json(silent=True) or {}).get("delta", 1)
+        delta = (request.get_json(silent=True) or {}).get("delta", 0.5)
     else:
-        delta = request.args.get("delta", 1)
+        delta = request.args.get("delta", 0.5)
     try:
-        delta = int(delta)
+        delta = float(delta)
     except (ValueError, TypeError):
-        delta = 1
+        delta = 0.5
     data = load_water()
     today = date.today().isoformat()
-    data[today] = max(0, int(data.get(today, 0)) + delta)
+    current = float(data.get(today, 0) or 0)
+    data[today] = round(max(0, current + delta), 1)
     save_water(data)
     return jsonify(water_today())
 
@@ -1282,8 +1283,8 @@ def build_weekly_review():
 
     # Water: days the goal was met.
     water = load_water()
-    hit = sum(1 for d in days if int(water.get(d, 0)) >= WATER_GOAL)
-    logged = sum(1 for d in days if int(water.get(d, 0)) > 0)
+    hit = sum(1 for d in days if float(water.get(d, 0) or 0) >= WATER_GOAL)
+    logged = sum(1 for d in days if float(water.get(d, 0) or 0) > 0)
     if logged:
         lines.append(f"Water goal hit {hit}/7 days")
 

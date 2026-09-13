@@ -589,13 +589,13 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         pass
 
-    # Water: today's glasses vs goal.
+    # Water: today's bottles (1 L) vs goal.
     water = None
     try:
         with open(WATER_FILE) as f:
             wdata = json.load(f)
-        glasses = int(wdata.get(datetime.now().date().isoformat(), 0))
-        water = {"glasses": glasses, "goal": WATER_GOAL}
+        bottles = float(wdata.get(datetime.now().date().isoformat(), 0) or 0)
+        water = {"bottles": round(bottles, 1), "goal": WATER_GOAL}
     except (OSError, json.JSONDecodeError, ValueError):
         pass
 
@@ -967,7 +967,9 @@ def draw_tracker(screen, fonts, rect, tracker):
         wm_y = y + pad + title_surf.get_height() + 4 + sub * n_above
         parts = []
         if water:
-            parts.append(f"Water {water['glasses']}/{water['goal']}L")
+            b = water['bottles']
+            b_str = f"{b:.1f}".rstrip("0").rstrip(".")
+            parts.append(f"Water {b_str}/{water['goal']}L")
         if metric and metric.get("latest") is not None:
             chg = ""
             if metric.get("change"):

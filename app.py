@@ -495,9 +495,9 @@ def _board_sleep():
 
 def _board_water(today):
     data = _read_json(WATER_FILE, {})
-    glasses = int(data.get(today, 0))
-    pct = min(100, int(round((glasses / WATER_GOAL) * 100))) if WATER_GOAL else 0
-    return {"glasses": glasses, "goal": WATER_GOAL, "percent": pct}
+    bottles = float(data.get(today, 0) or 0)
+    pct = min(100, int(round((bottles / WATER_GOAL) * 100))) if WATER_GOAL else 0
+    return {"bottles": round(bottles, 1), "goal": WATER_GOAL, "percent": pct}
 
 
 def _board_journal():
