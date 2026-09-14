@@ -683,8 +683,7 @@ def health_data_route():
             day = datetime.strptime(date_arg, "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"enabled": True, "error": "bad date, use YYYY-MM-DD"}), 400
-    # Debug: return the raw API responses so we can see exactly what Google
-    # sends for steps (default sources vs wearables) plus the list endpoint.
+    # Debug: return the raw API responses (kept for future troubleshooting).
     if request.args.get("debug") == "1":
         token = google_health_access_token()
         return jsonify({
@@ -692,7 +691,6 @@ def health_data_route():
             "date": (day or date.today()).isoformat(),
             "token_ok": bool(token),
             "steps_all_sources": _gh_daily_rollup_raw("steps", token, day),
-            "steps_wearables": _gh_daily_rollup_raw("steps", token, day, "google-wearables"),
         })
     d = health_data(force=request.args.get("force") == "1", day=day) or {}
     return jsonify({"enabled": True, "date": (day or date.today()).isoformat(), **d})
