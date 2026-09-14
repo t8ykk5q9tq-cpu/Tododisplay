@@ -1036,49 +1036,72 @@ def draw_health(screen, fonts, rect, health):
 
 
 def draw_usage_pies(screen, fonts, rect, usage_map):
-    """Draw the last 5 hours of phone usage as 5 clock-pies (60 minute wedges
-    each), red where that minute was used. `usage_map` is {minute_of_day: app}."""
-    import math
+    """Draw the last 5 hours of phone usage as a clean horizontal timeline:
+    one wide bar, oldest (5h ago) on the left -> now on the right, with a red
+    slice for each used minute over a dim base, hour gridlines/labels, and a
+    'now' marker. `usage_map` is {minute_of_day: app}."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
-    pad = 16
+    pad = 18
     lab_font = fonts["tiny"]
 
+    # Title
+    title = lab_font.render("Phone use \u2014 last 5 hours", True, HEADER_COLOR)
+    screen.blit(title, (x + pad, y + pad))
+
     now = datetime.now()
-    cur_hour = now.hour
-    hours = [(cur_hour - i) % 24 for i in range(4, -1, -1)]  # oldest -> current
+    now_mod = now.hour * 60 + now.minute        # current minute-of-day
+    window = 5 * 60                              # 300 minutes
+    start_mod = now_mod - window + 1             # inclusive start
 
-    n = len(hours)
-    cell_w = (w - 2 * pad) // n
+    bar_x = x + pad
+    bar_w = w - 2 * pad
+    bar_top = y + pad + lab_font.get_height() + 8
     label_h = lab_font.get_height() + 4
-    radius = min(cell_w, h - 2 * pad - label_h) // 2 - 4
-    cy = y + pad + radius
-    used_col = (233, 69, 96)      # red
-    idle_col = (36, 48, 74)       # dim slate
+    bar_h = (y + h - pad) - bar_top - label_h
+    if bar_h < 10:
+        bar_h = 10
+    px_per_min = bar_w / window
 
-    for i, hr in enumerate(hours):
-        cx = x + pad + i * cell_w + cell_w // 2
-        base = hr * 60
-        # 60 minute wedges, minute 0 at top (12 o'clock), clockwise.
-        for m in range(60):
-            used = (base + m) in usage_map
-            col = used_col if used else idle_col
-            a0 = (m / 60) * 2 * math.pi - math.pi / 2
-            a1 = ((m + 1) / 60) * 2 * math.pi - math.pi / 2
-            pts = [(cx, cy)]
-            steps = 3
-            for s in range(steps + 1):
-                a = a0 + (a1 - a0) * (s / steps)
-                pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
-            pygame.draw.polygon(screen, col, pts)
-        # thin hub + outline for a clean look
-        pygame.draw.circle(screen, PANEL_COLOR, (cx, cy), max(3, radius // 6))
-        pygame.draw.circle(screen, (60, 70, 100), (cx, cy), radius, 1)
-        # hour label (e.g. "2pm")
-        ampm = "am" if hr < 12 else "pm"
+    # Dim base bar.
+    pygame.draw.rect(screen, (32, 42, 66),
+                     pygame.Rect(bar_x, bar_top, bar_w, bar_h), border_radius=6)
+
+    # Faint hour gridlines: at each exact hour boundary inside the window.
+    grid_col = (52, 62, 90)
+    first_hour_min = ((start_mod + 59) // 60) * 60   # first hour mark >= start
+    hm = first_hour_min
+    while hm <= now_mod:
+        gx = bar_x + int((hm - start_mod) * px_per_min)
+        pygame.draw.rect(screen, grid_col, pygame.Rect(gx, bar_top, 1, bar_h))
+        hm += 60
+
+    # Used minutes -> red slices.
+    used_col = (233, 69, 96)
+    for md in usage_map:
+        if start_mod <= md <= now_mod:
+            sx = bar_x + int((md - start_mod) * px_per_min)
+            sw_ = max(2, int(px_per_min) + 1)
+            pygame.draw.rect(screen, used_col,
+                             pygame.Rect(sx, bar_top, sw_, bar_h))
+
+    # 'now' marker at the right edge.
+    pygame.draw.rect(screen, (234, 234, 234),
+                     pygame.Rect(bar_x + bar_w - 2, bar_top, 2, bar_h))
+
+    # Hour labels under the gridlines (e.g. "2pm"), plus "now" at the right.
+    ly = bar_top + bar_h + 3
+    hm = first_hour_min
+    while hm <= now_mod:
+        hr = (hm // 60) % 24
+        ampm = "a" if hr < 12 else "p"
         disp = hr % 12 or 12
         lbl = lab_font.render(f"{disp}{ampm}", True, DONE_COLOR)
-        screen.blit(lbl, (cx - lbl.get_width() // 2, cy + radius + 4))
+        gx = bar_x + int((hm - start_mod) * px_per_min)
+        screen.blit(lbl, (gx - lbl.get_width() // 2, ly))
+        hm += 60
+    now_lbl = lab_font.render("now", True, DONE_COLOR)
+    screen.blit(now_lbl, (bar_x + bar_w - now_lbl.get_width(), ly))
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -1437,11 +1460,14 @@ def main():
                         + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
                         + 2 * 20)                             # top+bottom padding
 
-        # Usage-pies card (last 5 hours of phone use) — sits under the habits.
+        # Usage timeline card (last 5 hours of phone use) — sits under habits.
         usage_h = 0
         if usage_map:
-            # A row of 5 small clock pies + an hour label under each.
-            usage_h = int(min(sw, sh) // 7) + fonts["tiny"].get_height() + 4 + 2 * 16
+            tiny = fonts["tiny"].get_height()
+            usage_h = (tiny + 8          # title
+                       + 28              # timeline bar
+                       + tiny + 3        # hour labels
+                       + 2 * 18)         # padding
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
         # height shrinks to leave room for the health band, habit row, usage
