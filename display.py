@@ -928,43 +928,52 @@ def draw_app_opens(screen, fonts, rect, tracker):
 
 
 def draw_health(screen, fonts, rect, health):
-    """Draw a compact health band: steps (with goal bar), sleep, resting HR,
-    active minutes — laid out as columns across the width."""
+    """Draw the health band: steps (with goal bar), sleep, resting HR, active
+    minutes as evenly-spaced columns, each with a label, a big value, and a
+    consistent third line so the columns align."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
-    pad = 16
+    pad = 20
     title = fonts["clock"].render("Health", True, HEADER_COLOR)
     screen.blit(title, (x + pad, y + pad))
 
-    val_font = fonts["item"]
+    val_font = fonts["clock"]   # bigger values (matches the tracker band)
     lab_font = fonts["tiny"]
-    # Content row starts below the title.
-    cy = y + pad + title.get_height() + 8
-    # Four columns across the band.
+    sub_font = fonts["tiny"]
+
+    # Content area below the title, vertically centered in the leftover space.
+    content_top = y + pad + title.get_height() + 10
     cols = 4
     col_w = (w - 2 * pad) // cols
+    # Row layout inside a column: label, value, third line (bar/sub).
+    lab_h = lab_font.get_height()
+    val_h = val_font.get_height()
+    third_h = max(sub_font.get_height(), 12)
+    block_h = lab_h + 6 + val_h + 8 + third_h
+    # Center the block vertically in the remaining band height.
+    avail = (y + h) - content_top - pad
+    cy = content_top + max(0, (avail - block_h) // 2)
 
     def draw_stat(ci, label, value, sub=None, bar=None, value_color=HEADER_COLOR):
         cx = x + pad + ci * col_w
         lab = lab_font.render(label, True, DONE_COLOR)
         screen.blit(lab, (cx, cy))
         val = val_font.render(value, True, value_color)
-        screen.blit(val, (cx, cy + lab.get_height() + 4))
-        vy = cy + lab.get_height() + 4 + val.get_height()
+        screen.blit(val, (cx, cy + lab_h + 6))
+        third_y = cy + lab_h + 6 + val_h + 8
         if bar is not None:
-            bw = col_w - 12
-            bh = 8
-            by = vy + 6
+            bw = col_w - 16
+            bh = 10
             pygame.draw.rect(screen, (15, 52, 96),
-                             pygame.Rect(cx, by, bw, bh), border_radius=4)
+                             pygame.Rect(cx, third_y, bw, bh), border_radius=5)
             fillw = int(bw * max(0, min(1, bar)))
             fill_col = (46, 204, 113) if bar >= 1 else HEADER_COLOR
             if fillw > 0:
                 pygame.draw.rect(screen, fill_col,
-                                 pygame.Rect(cx, by, fillw, bh), border_radius=4)
+                                 pygame.Rect(cx, third_y, fillw, bh), border_radius=5)
         elif sub:
-            s = lab_font.render(sub, True, TEXT_COLOR)
-            screen.blit(s, (cx, vy + 4))
+            s = sub_font.render(sub, True, TEXT_COLOR)
+            screen.blit(s, (cx, third_y))
 
     # Steps
     steps = health.get("steps")
@@ -987,18 +996,22 @@ def draw_health(screen, fonts, rect, health):
                 return d.strftime("%H:%M")
             except (ValueError, AttributeError):
                 return "--"
-        sub = f"{_t(sl.get('bedtime'))}\u2192{_t(sl.get('waketime'))}"
+        sub = f"{_t(sl.get('bedtime'))} \u2192 {_t(sl.get('waketime'))}"
         draw_stat(1, "SLEEP", dur, sub=sub)
     else:
         draw_stat(1, "SLEEP", "--")
 
     # Resting HR
     hr = health.get("resting_hr")
-    draw_stat(2, "RESTING HR", f"{hr} bpm" if hr is not None else "--")
+    draw_stat(2, "RESTING HR",
+              f"{hr}" if hr is not None else "--",
+              sub="bpm" if hr is not None else None)
 
     # Active minutes
     am = health.get("active_minutes")
-    draw_stat(3, "ACTIVE", f"{am} min" if am is not None else "--")
+    draw_stat(3, "ACTIVE",
+              f"{am}" if am is not None else "--",
+              sub="min" if am is not None else None)
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -1375,13 +1388,14 @@ def main():
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
-        # Health band (steps/sleep/HR/active) — a compact single-row band.
+        # Health band (steps/sleep/HR/active) — one row of stat columns.
         health_h = 0
         if health_data_val:
-            health_h = (fonts["clock"].get_height() + 8       # title
-                        + fonts["tiny"].get_height() + 4      # label row
-                        + fonts["item"].get_height()          # value row
-                        + 14 + 2 * 16)                        # bar + padding
+            health_h = (fonts["clock"].get_height() + 10      # title
+                        + fonts["tiny"].get_height() + 6      # label row
+                        + fonts["clock"].get_height() + 8     # value row (big)
+                        + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
+                        + 2 * 20 + 10)                        # padding + slack
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
         # height shrinks to leave room for the health band, habit row,
