@@ -140,6 +140,38 @@
             return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
         }
 
+        const PALETTE = ["#00d4ff", "#e94560", "#2ecc71", "#f5a623", "#c13584", "#9b6dff", "#1da1f2"];
+
+        // N-series stacked bar chart. series = [{name, daily:[...]}], values in
+        // the same unit; totalFmt(sumForDay) shows a label above each bar.
+        function multiStackChart(title, note, labels, series, colorFor) {
+            const days = labels.length;
+            const totals = labels.map((_, i) => series.reduce((s, ser) => s + (ser.daily[i] || 0), 0));
+            const peak = Math.max(1, ...totals);
+            const bars = labels.map((lab, i) => {
+                const total = totals[i];
+                const hTotal = total > 0 ? Math.max(6, Math.round((total / peak) * 100)) : 4;
+                // Stack segments top-to-bottom in series order.
+                const segs = series.map((ser, si) => {
+                    const v = ser.daily[i] || 0;
+                    const pct = total > 0 ? (v / total) * 100 : 0;
+                    return pct > 0 ? `<div class="seg" style="height:${pct}%;background:${colorFor(ser, si)}"></div>` : "";
+                }).join("");
+                return `<div class="col"><div class="stack" style="height:${hTotal}%">${segs}</div>` +
+                    `<div class="d">${lab}</div></div>`;
+            }).join("");
+            const legend = series.map((ser, si) =>
+                `<span><span class="sw" style="background:${colorFor(ser, si)}"></span>${ser.name}</span>`
+            ).join("");
+            return `<div class="chart"><h2>${title}</h2>` +
+                (note ? `<div class="cnote">${note}</div>` : "") +
+                `<div class="bars">${bars}</div>` +
+                `<div class="legend">${legend}</div></div>`;
+        }
+
+        const STAGE_COLORS = { DEEP: "#3b5bdb", REM: "#9b6dff", LIGHT: "#00d4ff", AWAKE: "#e94560" };
+        const STAGE_ORDER = ["AWAKE", "REM", "LIGHT", "DEEP"];  // top -> bottom
+
         async function refresh() {
             let d;
             try { d = await (await fetch("/weekly-review-data", { cache: "no-store" })).json(); $("net").textContent = ""; }
@@ -174,9 +206,32 @@
             const charts = [];
             charts.push(stackedChart("Focus vs Distraction", "hours per day", L,
                 foc.focus_by_day, foc.distraction_by_day, "#00d4ff", "#e94560", "Focus", "Distraction"));
-            charts.push(barChart("Sleep", "hours per night", L, sl.series_min, "#9b6dff", v => (v / 60).toFixed(1) + "h"));
-            charts.push(stackedChart("Screen time", "minutes per day", L,
-                us.mac_min, us.phone_min, "#00d4ff", "#e94560", "Computer", "Phone"));
+
+            // Sleep: stacked stages per night if available, else plain duration.
+            if (sl.stages_series) {
+                const stageSeries = STAGE_ORDER.map(k => ({
+                    name: k.charAt(0) + k.slice(1).toLowerCase(),
+                    key: k,
+                    daily: sl.stages_series.map(n => (n && n[k]) || 0),
+                }));
+                charts.push(multiStackChart("Sleep stages", "minutes per night", L,
+                    stageSeries, ser => STAGE_COLORS[ser.key] || "#6a7290"));
+            } else {
+                charts.push(barChart("Sleep", "hours per night", L, sl.series_min, "#9b6dff", v => (v / 60).toFixed(1) + "h"));
+            }
+
+            // Screen time: per-app stacked (seconds -> minutes) with a legend.
+            if (us.apps_daily && us.apps_daily.length) {
+                const appSeries = us.apps_daily.map(a => ({
+                    name: a.app,
+                    daily: a.daily.map(s => Math.round(s / 60)),  // seconds -> minutes
+                }));
+                charts.push(multiStackChart("Screen time by app", "minutes per day", L,
+                    appSeries, (ser, si) => PALETTE[si % PALETTE.length]));
+            } else {
+                charts.push(stackedChart("Screen time", "minutes per day", L,
+                    us.mac_min, us.phone_min, "#00d4ff", "#e94560", "Computer", "Phone"));
+            }
             charts.push(barChart("Mood", "avg per day (/5)", L, mo.series, "#f5a623", v => v.toFixed(1)));
             charts.push(barChart("Water", "bottles per day", L, wa.series, "#00d4ff", v => v));
             charts.push(barChart("Check-ins", "per day", L, ci.series, "#2ecc71", v => v));
