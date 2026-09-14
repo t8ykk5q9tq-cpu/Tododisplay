@@ -21,6 +21,12 @@
             border: 1px solid #22284a;
         }
         .site-nav a.active { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
+        .rangetabs { display: flex; gap: 6px; }
+        .rtab {
+            padding: 0.35rem 0.8rem; border-radius: 999px; border: 1px solid #22284a;
+            background: #16213e; color: #8a8a9a; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        }
+        .rtab.active { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
 
         /* Headline stat cards */
         .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
@@ -77,9 +83,15 @@
     <header>
         <div>
             <h1>Weekly Review</h1>
-            <div class="sub">The last 7 days</div>
+            <div class="sub" id="range-sub">The last 7 days</div>
         </div>
-        <div class="updated" id="updated"></div>
+        <div style="display:flex;align-items:center;gap:12px">
+            <div class="rangetabs">
+                <button class="rtab active" data-days="7">7 days</button>
+                <button class="rtab" data-days="30">30 days</button>
+            </div>
+            <div class="updated" id="updated"></div>
+        </div>
     </header>
 
     <div class="stats" id="stats"></div>
@@ -172,10 +184,12 @@
         const STAGE_COLORS = { DEEP: "#3b5bdb", REM: "#9b6dff", LIGHT: "#00d4ff", AWAKE: "#e94560" };
         const STAGE_ORDER = ["AWAKE", "REM", "LIGHT", "DEEP"];  // top -> bottom
 
+        let RANGE = 7;
         async function refresh() {
             let d;
-            try { d = await (await fetch("/weekly-review-data", { cache: "no-store" })).json(); $("net").textContent = ""; }
+            try { d = await (await fetch("/weekly-review-data?days=" + RANGE, { cache: "no-store" })).json(); $("net").textContent = ""; }
             catch (e) { $("net").textContent = "Offline - retrying..."; return; }
+            $("range-sub").textContent = "The last " + RANGE + " days";
 
             const L = d.labels || [];
 
@@ -243,6 +257,15 @@
 
             $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         }
+
+        document.querySelectorAll(".rtab").forEach(function (b) {
+            b.addEventListener("click", function () {
+                RANGE = parseInt(b.dataset.days, 10);
+                document.querySelectorAll(".rtab").forEach(x => x.classList.remove("active"));
+                b.classList.add("active");
+                refresh();
+            });
+        });
 
         setInterval(refresh, 60000);
         refresh();

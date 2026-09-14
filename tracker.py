@@ -446,34 +446,38 @@ def _gh_sleep_range(token, days=7):
         wake = datetime.fromisoformat(parsed["waketime"].replace("Z", "+00:00"))
         d = wake.date().isoformat()
         # If multiple sessions end the same day, keep the longest.
-        if parsed["duration_min"] > by_day.get(d, 0):
-            by_day[d] = parsed["duration_min"]
+        if parsed["duration_min"] > by_day.get(d, {}).get("duration_min", 0):
+            by_day[d] = {"duration_min": parsed["duration_min"],
+                         "stages": parsed.get("stages")}
     start = date.today() - timedelta(days=days - 1)
     days_list = [(start + timedelta(days=i)).isoformat() for i in range(days)]
-    return [{"date": d, "duration_min": by_day.get(d, 0)} for d in days_list]
+    return [{"date": d,
+             "duration_min": by_day.get(d, {}).get("duration_min", 0),
+             "stages": by_day.get(d, {}).get("stages")}
+            for d in days_list]
 
 
-# Cache weekly health data ~30 min.
-_gh_week = {"data": None, "fetched_at": 0}
+# Cache weekly health data ~30 min, keyed by the day-count (7, 30, ...).
+_gh_week = {}
 GH_WEEK_CACHE_SEC = 1800
 
 
-def health_week(force=False):
+def health_week(force=False, days_n=7):
     """Return {steps_week:[{date,steps}], sleep_week:[{date,duration_min}]},
     cached. None if disabled."""
     if not google_health_enabled():
         return None
     now = time.time()
-    if (not force and _gh_week["data"] is not None
-            and now < _gh_week["fetched_at"] + GH_WEEK_CACHE_SEC):
-        return _gh_week["data"]
+    cache = _gh_week.get(days_n)
+    if (not force and cache is not None
+            and now < cache["fetched_at"] + GH_WEEK_CACHE_SEC):
+        return cache["data"]
     token = google_health_access_token()
     if not token:
-        return _gh_week["data"]
-    data = {"steps_week": _gh_steps_range(token),
-            "sleep_week": _gh_sleep_range(token)}
-    _gh_week["data"] = data
-    _gh_week["fetched_at"] = now
+        return cache["data"] if cache else None
+    data = {"steps_week": _gh_steps_range(token, days_n),
+            "sleep_week": _gh_sleep_range(token, days_n)}
+    _gh_week[days_n] = {"data": data, "fetched_at": now}
     return data
 
 
@@ -1480,7 +1484,7 @@ def _fmt_clock(minutes):
     return f"{h:02d}:{m:02d}"
 
 
-def sleep_summary_week():
+def sleep_summary_week(nights_n=7):
     """Pair each 'sleep' with the next 'wake' into nights, over the last 7
     completed nights. Returns per-night rows + regularity stats.
 
@@ -1509,8 +1513,8 @@ def sleep_summary_week():
                     "duration_min": dur_min,
                 })
             pending_sleep = None
-    # last 7 nights
-    recent = nights[-7:]
+    # last `nights_n` nights
+    recent = nights[-nights_n:]
     bed_mins = [n["bed_min"] for n in recent]
     wake_mins = [n["wake_min"] for n in recent]
     durs = [n["duration_min"] for n in recent]
@@ -1744,14 +1748,19 @@ def build_weekly_review():
     return "\n".join(lines)
 
 
-def weekly_review_data():
-    """Structured 7-day rollup for the weekly-review page. Per-day series
-    (oldest->newest) plus summary figures across focus/distraction, sleep,
-    habits, check-ins, mood, water, weight, and phone/computer usage."""
+def weekly_review_data(days_n=7):
+    """Structured rollup over the last `days_n` days for the review page.
+    Per-day series (oldest->newest) plus summary figures across
+    focus/distraction, sleep, habits, check-ins, mood, water, weight, usage."""
+    days_n = max(1, min(int(days_n), 90))
     today = date.today()
-    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    days = [(today - timedelta(days=i)).isoformat() for i in range(days_n - 1, -1, -1)]
     day_set = set(days)
-    labels = [datetime.fromisoformat(d).strftime("%a") for d in days]
+    # Weekday labels for a week; short date labels (M/D) for longer ranges.
+    if days_n <= 7:
+        labels = [datetime.fromisoformat(d).strftime("%a") for d in days]
+    else:
+        labels = [datetime.fromisoformat(d).strftime("%-m/%-d") for d in days]
 
     # --- App usage (focus/distraction) per day + weekly totals ---
     au = load_appuse()
@@ -1788,8 +1797,8 @@ def weekly_review_data():
     phone_min = _minutes_by_day(USAGE_MIN_FILE)
     mac_min = _minutes_by_day(MAC_USAGE_MIN_FILE)
 
-    # --- Sleep per night (from the weekly summary) ---
-    sl = sleep_summary_week()
+    # --- Sleep per night (over the selected window) ---
+    sl = sleep_summary_week(days_n)
     sleep_by_day = {n["date"]: n["duration_min"] for n in sl.get("nights", [])}
     sleep_series = [sleep_by_day.get(d, 0) for d in days]
 
@@ -1840,25 +1849,47 @@ def weekly_review_data():
                      if len(wk_points) >= 2 else None)
     weight_latest = wk_points[-1]["value"] if wk_points else None
 
-    # --- Steps per day (Google Health), if enabled ---
+    # --- Per-app daily usage (top apps over the week, seconds/day) ---
+    per_app = {}   # app -> [sec per day]
+    for i, d in enumerate(days):
+        for a, secs in totals_by_day.get(d, {}).items():
+            per_app.setdefault(a, [0] * days_n)[i] = secs
+    app_rows = sorted(per_app.items(), key=lambda kv: -sum(kv[1]))
+    top_apps = app_rows[:6]
+    other = [0] * days_n
+    for a, series in app_rows[6:]:
+        for i in range(days_n):
+            other[i] += series[i]
+    apps_daily = [{"app": a.replace("Mac:", ""), "daily": s} for a, s in top_apps]
+    if any(other):
+        apps_daily.append({"app": "Other", "daily": other})
+
+    # --- Steps per day (Google Health), if enabled + per-night sleep stages ---
     steps_series = None
+    sleep_stages_series = None
     if google_health_enabled():
-        wk = health_week() or {}
+        wk = health_week(days_n=days_n) or {}
         steps_map = {r["date"]: r["steps"] for r in wk.get("steps_week", [])}
         steps_series = [steps_map.get(d, 0) for d in days]
+        stage_map = {r["date"]: r.get("stages") for r in wk.get("sleep_week", [])}
+        # Per-night {DEEP,REM,LIGHT,AWAKE} minutes, aligned to `days`.
+        if any(stage_map.get(d) for d in days):
+            sleep_stages_series = [stage_map.get(d) or {} for d in days]
 
     return {
         "days": days, "labels": labels,
         "focus": {"total_sec": focus_total, "distraction_sec": distraction_total,
                   "focus_by_day": focus_by_day, "distraction_by_day": distraction_by_day},
         "usage": {"phone_min": phone_min, "mac_min": mac_min,
-                  "phone_total": sum(phone_min), "mac_total": sum(mac_min)},
+                  "phone_total": sum(phone_min), "mac_total": sum(mac_min),
+                  "apps_daily": apps_daily},
         "sleep": {"series_min": sleep_series,
                   "avg_duration_min": sl.get("avg_duration_min"),
                   "avg_bedtime_min": sl.get("avg_bedtime_min"),
                   "avg_waketime_min": sl.get("avg_waketime_min"),
                   "bedtime_regularity_min": sl.get("bedtime_regularity_min"),
                   "waketime_regularity_min": sl.get("waketime_regularity_min"),
+                  "stages_series": sleep_stages_series,
                   "nights": len(sl.get("nights", []))},
         "habits": {"done": habit_done, "total": habit_total,
                    "percent": int(round(habit_done / habit_total * 100)) if habit_total else 0},
@@ -1874,7 +1905,11 @@ def weekly_review_data():
 
 @app.route("/weekly-review-data")
 def weekly_review_data_route():
-    return jsonify(weekly_review_data())
+    try:
+        days_n = int(request.args.get("days", 7))
+    except (ValueError, TypeError):
+        days_n = 7
+    return jsonify(weekly_review_data(days_n))
 
 
 @app.route("/weekly-review")
