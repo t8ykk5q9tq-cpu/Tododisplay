@@ -1035,29 +1035,16 @@ def draw_tracker(screen, fonts, rect, tracker):
 
     # (Mood moved to the Health band.)
 
-    # Compliance line: check-ins done/expected, red + warning when behind.
+    # (Compliance check-ins + streak moved to the weather bar's top-left.)
     comp = tracker.get("compliance")
-    if comp and comp["expected"] > 0:
-        if comp["behind"]:
-            ctext = (f"\u26a0 BEHIND: {comp['done']}/{comp['expected']} check-ins "
-                     f"({comp['percent']}%)  -  {comp['missed']} missed")
-            ccolor = WARN_COLOR
-        else:
-            ctext = (f"Check-ins {comp['done']}/{comp['expected']} ({comp['percent']}%)"
-                     f"   streak {comp['streak']}d")
-            ccolor = HEADER_COLOR if comp["percent"] >= 90 else TEXT_COLOR
-        c_surf = fonts["tiny"].render(ctext, True, ccolor)
-        # Draw just under the title line.
-        screen.blit(c_surf, (x + pad, y + pad + title_surf.get_height() + 4))
 
     # Daily metric (e.g. weight) sub-line. Sleep + water moved to the Health
-    # band, so they're no longer shown here.
-    comp_has_line = bool(comp and comp["expected"] > 0)
+    # band and compliance to the weather bar, so the metric sits right under
+    # the title now.
     metric = tracker.get("metric")
     metric_has_line = bool(metric and metric.get("latest") is not None)
     if metric_has_line:
-        sub = fonts["tiny"].get_height() + 6
-        m_y = y + pad + title_surf.get_height() + 4 + (sub if comp_has_line else 0)
+        m_y = y + pad + title_surf.get_height() + 4
         chg = ""
         if metric.get("change"):
             arrow = "\u2191" if metric["change"] > 0 else "\u2193"
@@ -1084,12 +1071,9 @@ def draw_tracker(screen, fonts, rect, tracker):
 
     # Two columns below the header: recent check-ins (left) + today summary (right).
     # Leave extra room if the compliance line was drawn under the title.
-    comp = tracker.get("compliance")
     sub_h = fonts["tiny"].get_height() + 6
-    comp_offset = sub_h if (comp and comp["expected"] > 0) else 0
     metric_offset = sub_h if metric_has_line else 0
-    content_y = (y + pad + title_surf.get_height() + 12
-                 + comp_offset + metric_offset)
+    content_y = (y + pad + title_surf.get_height() + 12 + metric_offset)
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
     summary = tracker.get("summary") or []
@@ -1261,6 +1245,8 @@ def main():
             weather_bar_h += tiny_h + 4
         if precip_alert:
             weather_bar_h += tiny_h + 4
+        # Ensure room for the top-left check-in + streak corner (2 tiny lines).
+        weather_bar_h = max(weather_bar_h, 8 + 2 * (tiny_h + 2) + 8)
         wbar = pygame.Rect(margin, margin, sw - 2 * margin, weather_bar_h)
         pygame.draw.rect(canvas, PANEL_COLOR, wbar, border_radius=12)
 
@@ -1283,11 +1269,30 @@ def main():
             canvas.blit(p_surf, (margin + (wbar.width - p_surf.get_width()) // 2, wy))
             wy += tiny_h + 4
 
-        # Under-voltage warning: a red flag in the weather bar's top-left corner.
+        # Top-left corner: check-in compliance + streak (moved here from the
+        # tracker card). A power warning, if any, goes on the line below it.
+        corner_y = margin + 6
+        comp = tracker_data.get("compliance") if tracker_data else None
+        if comp and comp.get("expected", 0) > 0:
+            if comp["behind"]:
+                ci_text = f"\u26a0 {comp['done']}/{comp['expected']} check-ins"
+                ci_color = WARN_COLOR
+            else:
+                ci_text = f"Check-ins {comp['done']}/{comp['expected']}"
+                ci_color = HEADER_COLOR if comp["percent"] >= 90 else TEXT_COLOR
+            ci_surf = fonts["tiny"].render(ci_text, True, ci_color)
+            canvas.blit(ci_surf, (margin + 12, corner_y))
+            corner_y += tiny_h + 2
+            streak_surf = fonts["tiny"].render(
+                f"streak {comp.get('streak', 0)}d", True, DONE_COLOR)
+            canvas.blit(streak_surf, (margin + 12, corner_y))
+            corner_y += tiny_h + 2
+
+        # Under-voltage warning: a red flag below the check-in corner.
         power_warn = get_power_warning()
         if power_warn:
             pw_surf = fonts["tiny"].render("\u26a0 " + power_warn, True, WARN_COLOR)
-            canvas.blit(pw_surf, (margin + 12, margin + 6))
+            canvas.blit(pw_surf, (margin + 12, corner_y))
 
         # Connectivity + RAM usage in the weather bar's top-right corner.
         online = is_online()
