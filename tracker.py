@@ -129,6 +129,14 @@ WATER_GOAL = int(getattr(cfg, "WATER_GOAL", 3))
 METRIC_LABEL = str(getattr(cfg, "METRIC_LABEL", "Weight"))
 METRIC_UNIT = str(getattr(cfg, "METRIC_UNIT", "lb"))
 
+# Google Health API (Fitbit data). Set these in tracker_config.py after running
+# health_auth.py. Leave blank to disable the health integration entirely.
+GOOGLE_HEALTH_CLIENT_ID = str(getattr(cfg, "GOOGLE_HEALTH_CLIENT_ID", ""))
+GOOGLE_HEALTH_CLIENT_SECRET = str(getattr(cfg, "GOOGLE_HEALTH_CLIENT_SECRET", ""))
+GOOGLE_HEALTH_REFRESH_TOKEN = str(getattr(cfg, "GOOGLE_HEALTH_REFRESH_TOKEN", ""))
+# Daily steps goal for the progress bar.
+STEPS_GOAL = int(getattr(cfg, "STEPS_GOAL", 10000))
+
 # The Pi's reachable tracker URL, so Pushover reminders can deep-link to the
 # check-in page. Defaults to the Pi 5's Tailscale address; override in config.
 PI_BASE_URL = getattr(cfg, "PI_BASE_URL", "http://100.102.96.42:5050")
@@ -232,6 +240,130 @@ def _page_url(path=""):
     if not PI_BASE_URL:
         return None
     return PI_BASE_URL.rstrip("/") + "/" + path.lstrip("/")
+
+
+# --- Google Health API access ---
+GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+GOOGLE_HEALTH_BASE = "https://health.googleapis.com/v4"
+# In-memory access-token cache: {"token": str, "expires_at": epoch}.
+_gh_token = {"token": None, "expires_at": 0}
+
+
+def google_health_enabled():
+    return bool(GOOGLE_HEALTH_CLIENT_ID and GOOGLE_HEALTH_CLIENT_SECRET
+                and GOOGLE_HEALTH_REFRESH_TOKEN)
+
+
+def google_health_access_token():
+    """Return a valid access token, refreshing via the stored refresh token if
+    the cached one is missing or within 60s of expiry. Returns None if the
+    integration isn't configured or the refresh fails."""
+    if not google_health_enabled():
+        return None
+    now = time.time()
+    if _gh_token["token"] and now < _gh_token["expires_at"] - 60:
+        return _gh_token["token"]
+    data = urllib.parse.urlencode({
+        "client_id": GOOGLE_HEALTH_CLIENT_ID,
+        "client_secret": GOOGLE_HEALTH_CLIENT_SECRET,
+        "refresh_token": GOOGLE_HEALTH_REFRESH_TOKEN,
+        "grant_type": "refresh_token",
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            GOOGLE_TOKEN_ENDPOINT, data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            tok = json.load(r)
+        _gh_token["token"] = tok.get("access_token")
+        _gh_token["expires_at"] = now + int(tok.get("expires_in", 3600))
+        return _gh_token["token"]
+    except Exception as e:
+        print(f"Google Health token refresh failed: {e}")
+        return None
+
+
+def _civil(dt):
+    """A CivilDateTime dict (date-only midnight) for the dailyRollUp range."""
+    return {"year": dt.year, "month": dt.month, "day": dt.day,
+            "hours": 0, "minutes": 0, "seconds": 0, "nanos": 0}
+
+
+def _gh_daily_rollup(data_type, token):
+    """POST a 1-day dailyRollUp for `data_type` (today) and return the single
+    rollup data point dict, or None. `token` is a valid access token."""
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    url = f"{GOOGLE_HEALTH_BASE}/users/me/dataTypes/{data_type}/dataPoints:dailyRollUp"
+    body = json.dumps({
+        "range": {"start": _civil(today), "end": _civil(tomorrow)},
+        "windowSizeDays": 1,
+    }).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.load(r)
+        points = resp.get("rollupDataPoints", [])
+        return points[0] if points else None
+    except Exception as e:
+        print(f"Google Health {data_type} rollup failed: {e}")
+        return None
+
+
+# Cache health data ~10 min to respect API rate limits.
+_gh_data = {"data": None, "fetched_at": 0}
+GH_CACHE_SEC = 600
+
+
+def health_data(force=False):
+    """Return today's {steps, steps_goal, resting_hr, active_minutes} from
+    Google Health, cached. None if the integration is disabled."""
+    if not google_health_enabled():
+        return None
+    now = time.time()
+    if (not force and _gh_data["data"] is not None
+            and now < _gh_data["fetched_at"] + GH_CACHE_SEC):
+        return _gh_data["data"]
+    token = google_health_access_token()
+    if not token:
+        return _gh_data["data"]  # serve stale on auth failure
+
+    result = {"steps": None, "steps_goal": STEPS_GOAL,
+              "resting_hr": None, "active_minutes": None}
+
+    steps_pt = _gh_daily_rollup("steps", token)
+    if steps_pt and "steps" in steps_pt:
+        result["steps"] = int(steps_pt["steps"].get("countSum", 0))
+
+    hr_pt = _gh_daily_rollup("daily-resting-heart-rate", token)
+    if hr_pt and "restingHeartRatePersonalRange" in hr_pt:
+        rng = hr_pt["restingHeartRatePersonalRange"]
+        lo = rng.get("beatsPerMinuteMin")
+        hi = rng.get("beatsPerMinuteMax")
+        if lo is not None and hi is not None:
+            result["resting_hr"] = int(round((lo + hi) / 2))
+        elif lo is not None:
+            result["resting_hr"] = int(round(lo))
+
+    am_pt = _gh_daily_rollup("active-minutes", token)
+    if am_pt and "activeMinutes" in am_pt:
+        # ActiveMinutesRollupValue aggregates minutes; sum field name varies,
+        # so pull the first numeric *_sum value present.
+        am = am_pt["activeMinutes"]
+        for k, v in am.items():
+            if k.endswith("_sum") or k.endswith("Sum"):
+                try:
+                    result["active_minutes"] = int(round(float(v)))
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+    _gh_data["data"] = result
+    _gh_data["fetched_at"] = now
+    return result
 
 
 def load_log():
@@ -517,6 +649,16 @@ def usage_data():
         "focus": focus,                   # {focus_sec, distraction_sec, longest_focus_sec}
         "mac_week": mac_week,             # {days, apps:[{app, seconds, daily}]}
     })
+
+
+@app.route("/health-data")
+def health_data_route():
+    """Today's Google Health summary (steps/resting HR/active minutes).
+    Returns {enabled: false} if the integration isn't configured."""
+    if not google_health_enabled():
+        return jsonify({"enabled": False})
+    d = health_data(force=request.args.get("force") == "1") or {}
+    return jsonify({"enabled": True, **d})
 
 
 @app.route("/log", methods=["GET"])

@@ -144,6 +144,10 @@
                 <h2>Water (1 L bottles)</h2>
                 <div id="water"></div>
             </div>
+            <div class="panel" style="flex:0 0 auto" id="health-panel" hidden>
+                <h2>Fitbit</h2>
+                <div id="health"></div>
+            </div>
             <div class="panel" style="flex:0 0 auto">
                 <h2 id="metric-h">Weight</h2>
                 <div id="metric"></div>
@@ -270,6 +274,29 @@
                 (full ? '<div class="sub good">Goal reached \u2713</div>' : "");
         }
 
+        function renderHealth(h) {
+            const panel = document.getElementById("health-panel");
+            if (!h || !h.enabled) { panel.hidden = true; return; }
+            panel.hidden = false;
+            const el = $("health");
+            const steps = h.steps ?? 0;
+            const goal = h.steps_goal || 10000;
+            const pct = Math.min(100, Math.round((steps / goal) * 100));
+            const full = steps >= goal;
+            let html =
+                `<div class="stat-row"><span>Steps</span>` +
+                `<span class="v">${steps.toLocaleString()} / ${goal.toLocaleString()}</span></div>` +
+                `<div class="wbar-track"><div class="wbar-fill ${full ? "full" : ""}" style="width:${pct}%"></div></div>`;
+            if (h.resting_hr != null) {
+                html += `<div class="stat-row"><span>Resting HR</span><span class="v">${h.resting_hr} bpm</span></div>`;
+            }
+            if (h.active_minutes != null) {
+                html += `<div class="stat-row"><span>Active minutes</span><span class="v">${h.active_minutes}m</span></div>`;
+            }
+            if (full) html += '<div class="sub good">Step goal reached \u2713</div>';
+            el.innerHTML = html;
+        }
+
         function renderMetric(m) {
             $("metric-h").textContent = (m && m.label) || "Metric";
             const el = $("metric");
@@ -360,6 +387,7 @@
             renderSleep(d.sleep);
             renderMoodComp(d.mood, d.compliance);
             renderWater(d.water);
+            renderHealth(d.health);
             renderMetric(d.metric);
             renderJournal(d.journal);
             renderMacWeek(d.mac_week);

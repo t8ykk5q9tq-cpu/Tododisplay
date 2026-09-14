@@ -84,6 +84,15 @@ WATER_GOAL = 3                 # 1 L bottles of water per day (progress bar goal
 METRIC_LABEL = "Weight"        # label for the daily number you log
 METRIC_UNIT = "lb"             # unit shown next to it (e.g. "lb", "kg")
 
+# --- Google Health API (Fitbit steps / heart rate / sleep) ---
+# Run health_auth.py once to get these. Leave blank to disable. See the
+# repo's setup notes; the app must be "In Production" so the refresh token
+# doesn't expire every 7 days.
+GOOGLE_HEALTH_CLIENT_ID = ""
+GOOGLE_HEALTH_CLIENT_SECRET = ""
+GOOGLE_HEALTH_REFRESH_TOKEN = ""
+STEPS_GOAL = 10000             # daily steps goal for the progress bar
+
 # --- Pi tracker URL (so Pushover reminders can deep-link to logging) ---
 # Set to the tracker's reachable address, e.g. your Tailscale URL:
 #   PI_BASE_URL = "http://100.102.96.42:5050"

@@ -558,6 +558,27 @@ def _board_weather_thread():
             time.sleep(60)
 
 
+# The tracker app (health data lives there since it holds the Google creds).
+TRACKER_URL = os.environ.get("TRACKER_URL", "http://127.0.0.1:5050")
+_health = {"data": None, "fetched_at": 0}
+
+
+def _board_health():
+    """Fetch the tracker's /health-data (same Pi), cached ~5 min. Returns None
+    if the integration is disabled or unreachable."""
+    now = time.time()
+    if _health["data"] is not None and now < _health["fetched_at"] + 300:
+        return _health["data"]
+    try:
+        with urllib.request.urlopen(TRACKER_URL + "/health-data", timeout=6) as r:
+            d = json.load(r)
+        _health["data"] = d if d.get("enabled") else None
+        _health["fetched_at"] = now
+    except Exception:
+        pass  # keep last value (or None) on failure
+    return _health["data"]
+
+
 def _read_json(path, default):
     try:
         with open(path) as f:
@@ -627,6 +648,7 @@ def api_board():
         "water": _board_water(today),
         "metric": _board_metric(),
         "journal": _board_journal(),
+        "health": _board_health(),
     })
 
 
