@@ -649,6 +649,9 @@ def api_board():
         "metric": _board_metric(),
         "journal": _board_journal(),
         "health": _board_health(),
+        # Health page lives on the tracker (port 5050). Build a browser-usable
+        # link from the host the board was opened on, so it works over Tailscale.
+        "health_url": f"http://{request.host.split(':')[0]}:5050/health",
     })
 
 

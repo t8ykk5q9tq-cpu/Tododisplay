@@ -107,6 +107,14 @@
         .spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 0.5rem; }
         .spark .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
         .spark .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
+        /* Nav links */
+        .nav { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+        .nav a {
+            padding: 0.4rem 0.9rem; border-radius: 999px; background: #16213e;
+            color: #00d4ff; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+            border: 1px solid #22284a;
+        }
+        .nav a:active { background: #0f3460; }
         /* Journal */
         .journal-form { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; }
         .journal-form input {
@@ -141,6 +149,10 @@
 </head>
 <body>
     <h1>Time Tracker</h1>
+    <div class="nav">
+        <a href="/usage">Screen Usage</a>
+        <a href="/health">Health</a>
+    </div>
 
     <div class="card countdown" id="countdown">
         <div class="time" id="cd-time">--:--</div>

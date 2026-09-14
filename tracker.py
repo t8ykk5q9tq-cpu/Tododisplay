@@ -371,7 +371,24 @@ def _parse_sleep_session(dp):
     dur = int((e - s).total_seconds() // 60)
     if dur <= 0 or dur > 20 * 60:
         return None
-    return {"bedtime": start, "waketime": end, "duration_min": dur}
+    # Sum minutes per stage (LIGHT/DEEP/REM/AWAKE). The API uses "sleepStages"
+    # on reads and "stages" on writes; accept either. Times are ISO strings.
+    stages = {}
+    for st in (sleep.get("sleepStages") or sleep.get("stages") or []):
+        stype = (st.get("type") or "").upper()
+        st_s, st_e = st.get("startTime"), st.get("endTime")
+        if not stype or not st_s or not st_e:
+            continue
+        try:
+            a = datetime.fromisoformat(st_s.replace("Z", "+00:00"))
+            b = datetime.fromisoformat(st_e.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        mins = int((b - a).total_seconds() // 60)
+        if mins > 0:
+            stages[stype] = stages.get(stype, 0) + mins
+    return {"bedtime": start, "waketime": end, "duration_min": dur,
+            "stages": stages or None}
 
 
 def sleep_last_night(token):
@@ -385,6 +402,79 @@ def sleep_last_night(token):
         if parsed:
             return parsed
     return None
+
+
+def _gh_steps_range(token, days=7):
+    """Return [{date, steps}] for the last `days` days (oldest->newest) via a
+    single multi-day dailyRollUp. Missing days come back as 0."""
+    end = date.today() + timedelta(days=1)          # exclusive end (tomorrow)
+    start = date.today() - timedelta(days=days - 1)
+    url = f"{GOOGLE_HEALTH_BASE}/users/me/dataTypes/steps/dataPoints:dailyRollUp"
+    body = json.dumps({
+        "range": {"start": _civil(start), "end": _civil(end)},
+        "windowSizeDays": 1,
+    }).encode()
+    by_day = {}
+    try:
+        req = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.load(r)
+        for pt in resp.get("rollupDataPoints", []):
+            cs = (pt.get("civilStartTime") or {}).get("date") or {}
+            if cs.get("year"):
+                d = date(cs["year"], cs["month"], cs["day"]).isoformat()
+                steps = int((pt.get("steps") or {}).get("countSum", 0))
+                by_day[d] = steps
+    except Exception as e:
+        print(f"Google Health steps range failed: {e}")
+    days_list = [(start + timedelta(days=i)).isoformat() for i in range(days)]
+    return [{"date": d, "steps": by_day.get(d, 0)} for d in days_list]
+
+
+def _gh_sleep_range(token, days=7):
+    """Return [{date, duration_min}] for the last `days` nights (oldest->newest),
+    attributing each session to the date it ended (wake day)."""
+    resp = _gh_sleep_raw(token, hours_back=days * 24 + 12)
+    points = resp.get("dataPoints", []) if isinstance(resp, dict) else []
+    by_day = {}
+    for dp in points:
+        parsed = _parse_sleep_session(dp)
+        if not parsed:
+            continue
+        wake = datetime.fromisoformat(parsed["waketime"].replace("Z", "+00:00"))
+        d = wake.date().isoformat()
+        # If multiple sessions end the same day, keep the longest.
+        if parsed["duration_min"] > by_day.get(d, 0):
+            by_day[d] = parsed["duration_min"]
+    start = date.today() - timedelta(days=days - 1)
+    days_list = [(start + timedelta(days=i)).isoformat() for i in range(days)]
+    return [{"date": d, "duration_min": by_day.get(d, 0)} for d in days_list]
+
+
+# Cache weekly health data ~30 min.
+_gh_week = {"data": None, "fetched_at": 0}
+GH_WEEK_CACHE_SEC = 1800
+
+
+def health_week(force=False):
+    """Return {steps_week:[{date,steps}], sleep_week:[{date,duration_min}]},
+    cached. None if disabled."""
+    if not google_health_enabled():
+        return None
+    now = time.time()
+    if (not force and _gh_week["data"] is not None
+            and now < _gh_week["fetched_at"] + GH_WEEK_CACHE_SEC):
+        return _gh_week["data"]
+    token = google_health_access_token()
+    if not token:
+        return _gh_week["data"]
+    data = {"steps_week": _gh_steps_range(token),
+            "sleep_week": _gh_sleep_range(token)}
+    _gh_week["data"] = data
+    _gh_week["fetched_at"] = now
+    return data
 
 
 # Cache health data ~10 min to respect API rate limits.
@@ -763,6 +853,11 @@ def health_data_route():
             "steps_all_sources": _gh_daily_rollup_raw("steps", token, day),
             "sleep_raw": _gh_sleep_raw(token),
         })
+    if request.args.get("range") == "week":
+        wk = health_week(force=request.args.get("force") == "1") or {}
+        return jsonify({"enabled": True, **wk})
+    if request.args.get("import_sleep") == "1":
+        return jsonify({"enabled": True, "imported": import_fitbit_sleep()})
     d = health_data(force=request.args.get("force") == "1", day=day) or {}
     return jsonify({"enabled": True, "date": (day or date.today()).isoformat(), **d})
 
@@ -1284,6 +1379,62 @@ def record_sleep_event(kind):
         events = events[-2000:]
     with open(SLEEP_FILE, "w") as f:
         json.dump(events, f)
+
+
+def import_fitbit_sleep():
+    """Convert the most recent Fitbit sleep session into sleep_log events
+    (a 'sleep' at bedtime + a 'wake' at waketime, tagged source='fitbit'),
+    so the weekly bedtime-regularity card and display use real device data.
+    De-duplicates by the wake date, and won't clobber a manual entry that
+    already exists for that night. Returns True if an import happened."""
+    if not google_health_enabled():
+        return False
+    token = google_health_access_token()
+    if not token:
+        return False
+    s = sleep_last_night(token)
+    if not s:
+        return False
+    try:
+        bed = datetime.fromisoformat(s["bedtime"].replace("Z", "+00:00")).astimezone()
+        wake = datetime.fromisoformat(s["waketime"].replace("Z", "+00:00")).astimezone()
+    except (ValueError, KeyError):
+        return False
+    wake_date = wake.date().isoformat()
+
+    events = load_sleep()
+    # Skip if we already have ANY event (manual or fitbit) for this wake date.
+    for e in events:
+        ts = str(e.get("timestamp", ""))
+        try:
+            ed = datetime.fromisoformat(ts).date().isoformat()
+        except ValueError:
+            continue
+        if ed == wake_date and e.get("kind") == "wake":
+            return False  # already have this night
+
+    events.append({"timestamp": bed.isoformat(), "kind": "sleep", "source": "fitbit"})
+    events.append({"timestamp": wake.isoformat(), "kind": "wake", "source": "fitbit"})
+    events.sort(key=lambda e: e.get("timestamp", ""))
+    if len(events) > 2000:
+        events = events[-2000:]
+    with open(SLEEP_FILE, "w") as f:
+        json.dump(events, f)
+    return True
+
+
+def fitbit_sleep_import_thread():
+    """Once an hour, try to import last night's Fitbit sleep into sleep_log.
+    Hourly (not daily) so it catches the data whenever it syncs in the
+    morning. import_fitbit_sleep() dedups by night, so repeats are no-ops."""
+    if not google_health_enabled():
+        return
+    while True:
+        try:
+            import_fitbit_sleep()
+        except Exception as e:
+            print(f"Fitbit sleep import error: {e}")
+        time.sleep(3600)
 
 
 def _minutes_since_midnight(dt):
@@ -2057,6 +2208,7 @@ if __name__ == "__main__":
     Thread(target=weekly_review_push_thread, daemon=True).start()
     Thread(target=backup_thread, daemon=True).start()
     Thread(target=session_credit_thread, daemon=True).start()
+    Thread(target=fitbit_sleep_import_thread, daemon=True).start()
     Thread(target=winddown_nudge_thread, daemon=True).start()
     Thread(target=compliance_nag_thread, daemon=True).start()
     Thread(target=app_open_nudge_thread, daemon=True).start()

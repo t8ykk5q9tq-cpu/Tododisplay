@@ -41,6 +41,17 @@
         .banner code { color: #eaeaea; background: #0f3460; padding: 2px 6px; border-radius: 5px; }
         .net { color: #6a6a78; font-size: 0.85rem; margin-top: 18px; text-align: center; }
         .updated { color: #6a6a78; font-size: 0.85rem; }
+        .wbars { display: flex; align-items: flex-end; gap: 8px; height: 90px; margin-top: 8px; }
+        .wbars .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+        .wbars .b { width: 100%; background: #00d4ff; border-radius: 4px 4px 0 0; min-height: 3px; }
+        .wbars .b.zero { background: #243056; }
+        .wbars .v { font-size: 0.62rem; color: #8a8a9a; margin-bottom: 3px; }
+        .wbars .d { font-size: 0.65rem; color: #6a6a78; margin-top: 4px; }
+        .card.wide { grid-column: 1 / -1; }
+        .stages-bar { display: flex; height: 16px; border-radius: 8px; overflow: hidden; margin-top: 14px; background: #0f3460; }
+        .stages-bar > div { height: 100%; }
+        .stages-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 0.8rem; color: #8a8a9a; }
+        .stages-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -84,6 +95,27 @@
                 (full ? '<div class="goal goodtxt">Goal reached \u2713</div>' : ""));
         }
 
+        const STAGE_COLORS = { DEEP: "#3b5bdb", REM: "#9b6dff", LIGHT: "#00d4ff", AWAKE: "#e94560" };
+        const STAGE_ORDER = ["DEEP", "REM", "LIGHT", "AWAKE"];
+        function stagesBlock(stages) {
+            if (!stages) return "";
+            const total = Object.values(stages).reduce((a, b) => a + b, 0) || 1;
+            const present = STAGE_ORDER.filter(k => stages[k]);
+            // any unexpected stage keys go on the end
+            Object.keys(stages).forEach(k => { if (!present.includes(k)) present.push(k); });
+            const segs = present.map(k => {
+                const pct = (stages[k] / total) * 100;
+                const col = STAGE_COLORS[k] || "#6a7290";
+                return `<div style="width:${pct}%;background:${col}"></div>`;
+            }).join("");
+            const legend = present.map(k => {
+                const col = STAGE_COLORS[k] || "#6a7290";
+                const label = k.charAt(0) + k.slice(1).toLowerCase();
+                return `<span><span class="sw" style="background:${col}"></span>${label} ${fmtDur(stages[k])}</span>`;
+            }).join("");
+            return `<div class="stages-bar">${segs}</div><div class="stages-legend">${legend}</div>`;
+        }
+
         function sleepCard(h) {
             const s = h.sleep;
             if (!s) return card("Sleep", '<div class="empty">No sleep recorded</div>');
@@ -93,12 +125,34 @@
                     `<div class="t"><div class="lab">Bed</div><div class="val accent">${fmtTime(s.bedtime)}</div></div>` +
                     `<div class="arrow">\u2192</div>` +
                     `<div class="t"><div class="lab">Wake</div><div class="val accent">${fmtTime(s.waketime)}</div></div>` +
-                `</div>`);
+                `</div>` +
+                stagesBlock(s.stages));
         }
 
         function statCard(title, value, unit) {
             if (value == null) return card(title, '<div class="empty">No data yet</div>');
             return card(title, `<div class="big">${value}<span class="unit">${unit}</span></div>`);
+        }
+
+        const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+        function dowLabel(dstr) {
+            const d = new Date(dstr + "T00:00:00");
+            return isNaN(d) ? "" : DOW[d.getDay()];
+        }
+        // rows: [{date, value}], fmt(value)->label string for the tooltip/top.
+        function weekChart(title, rows, valueKey, fmt) {
+            if (!rows || rows.length === 0) return "";
+            const vals = rows.map(r => r[valueKey] || 0);
+            const peak = Math.max(1, ...vals);
+            const bars = rows.map(r => {
+                const v = r[valueKey] || 0;
+                const h = v > 0 ? Math.max(6, Math.round((v / peak) * 100)) : 4;
+                const cls = v > 0 ? "b" : "b zero";
+                const top = v > 0 ? `<div class="v">${fmt(v)}</div>` : `<div class="v">&nbsp;</div>`;
+                return `<div class="col">${top}<div class="${cls}" style="height:${h}%"></div>` +
+                    `<div class="d">${dowLabel(r.date)}</div></div>`;
+            }).join("");
+            return `<div class="card wide"><h2>${title}</h2><div class="wbars">${bars}</div></div>`;
         }
 
         async function refresh() {
@@ -119,12 +173,23 @@
                 return;
             }
 
+            // Weekly trends (separate fetch, cached server-side).
+            let week = {};
+            try {
+                week = await (await fetch("/health-data?range=week", { cache: "no-store" })).json();
+            } catch (e) { /* leave trends out if unavailable */ }
+
+            const stepsFmt = (v) => v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k" : String(v);
+            const sleepFmt = (v) => `${Math.floor(v / 60)}h`;
+
             $("content").innerHTML =
                 '<div class="grid">' +
                 stepsCard(d) +
                 sleepCard(d) +
                 statCard("Resting Heart Rate", d.resting_hr, "bpm") +
                 statCard("Active Minutes", d.active_minutes, "min") +
+                weekChart("Steps - This Week", week.steps_week, "steps", stepsFmt) +
+                weekChart("Sleep - This Week", week.sleep_week, "duration_min", sleepFmt) +
                 '</div>';
 
             $("updated").textContent = "Updated " +
