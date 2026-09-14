@@ -293,6 +293,19 @@
             if (h.active_minutes != null) {
                 html += `<div class="stat-row"><span>Active minutes</span><span class="v">${h.active_minutes}m</span></div>`;
             }
+            if (h.sleep) {
+                const s = h.sleep;
+                const fmtT = (iso) => {
+                    const d = new Date(iso);
+                    return isNaN(d) ? "--" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                };
+                const dm = s.duration_min || 0;
+                const dur = `${Math.floor(dm / 60)}h ${dm % 60}m`;
+                html += `<div class="stat-row"><span>Sleep</span>` +
+                    `<span class="v">${dur}</span></div>`;
+                html += `<div class="stat-row"><span>${fmtT(s.bedtime)} \u2192 ${fmtT(s.waketime)}</span>` +
+                    `<span class="sub">last night</span></div>`;
+            }
             if (full) html += '<div class="sub good">Step goal reached \u2713</div>';
             el.innerHTML = html;
         }

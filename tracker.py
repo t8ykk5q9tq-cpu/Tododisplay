@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from threading import Event, Thread
@@ -328,6 +328,65 @@ def _gh_daily_rollup(data_type, token, day=None):
     return points[0] if points else None
 
 
+def _gh_sleep_raw(token, hours_back=48):
+    """List sleep sessions whose end time falls within the last `hours_back`
+    hours. Returns the parsed JSON (dataPoints ordered newest-first) or an
+    error dict."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours_back)
+    # RFC-3339 (UTC 'Z') timestamps for the sleep end_time filter.
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    flt = (f'sleep.interval.end_time >= "{start.strftime(fmt)}" AND '
+           f'sleep.interval.end_time < "{now.strftime(fmt)}"')
+    url = (f"{GOOGLE_HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints?"
+           + urllib.parse.urlencode({"filter": flt, "pageSize": 25}))
+    try:
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        print(f"Google Health sleep list HTTP {e.code}: {detail[:300]}")
+        return {"error": f"HTTP {e.code}", "detail": detail[:500]}
+    except Exception as e:
+        print(f"Google Health sleep list failed: {e}")
+        return {"error": str(e)}
+
+
+def _parse_sleep_session(dp):
+    """From a sleep DataPoint, return {bedtime, waketime, duration_min} using
+    the session interval. Times are ISO strings; duration in minutes."""
+    sleep = dp.get("sleep") or {}
+    interval = sleep.get("interval") or {}
+    start = interval.get("startTime")
+    end = interval.get("endTime")
+    if not start or not end:
+        return None
+    try:
+        s = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    dur = int((e - s).total_seconds() // 60)
+    if dur <= 0 or dur > 20 * 60:
+        return None
+    return {"bedtime": start, "waketime": end, "duration_min": dur}
+
+
+def sleep_last_night(token):
+    """Return the most recent sleep session as {bedtime, waketime,
+    duration_min} (ISO times), or None."""
+    resp = _gh_sleep_raw(token)
+    points = resp.get("dataPoints", []) if isinstance(resp, dict) else []
+    # Ordered newest-first; take the first parseable session.
+    for dp in points:
+        parsed = _parse_sleep_session(dp)
+        if parsed:
+            return parsed
+    return None
+
+
 # Cache health data ~10 min to respect API rate limits.
 _gh_data = {"data": None, "fetched_at": 0}
 GH_CACHE_SEC = 600
@@ -349,7 +408,12 @@ def health_data(force=False, day=None):
         return _gh_data["data"] if is_today else None  # serve stale on auth fail
 
     result = {"steps": None, "steps_goal": STEPS_GOAL,
-              "resting_hr": None, "active_minutes": None}
+              "resting_hr": None, "active_minutes": None, "sleep": None}
+
+    # Last night's sleep session (bedtime / wake / duration). Only fetched for
+    # the "today" view (it looks back over the last ~48h regardless).
+    if is_today:
+        result["sleep"] = sleep_last_night(token)
 
     steps_pt = _gh_daily_rollup("steps", token, day)
     if steps_pt and "steps" in steps_pt:
@@ -691,6 +755,7 @@ def health_data_route():
             "date": (day or date.today()).isoformat(),
             "token_ok": bool(token),
             "steps_all_sources": _gh_daily_rollup_raw("steps", token, day),
+            "sleep_raw": _gh_sleep_raw(token),
         })
     d = health_data(force=request.args.get("force") == "1", day=day) or {}
     return jsonify({"enabled": True, "date": (day or date.today()).isoformat(), **d})
