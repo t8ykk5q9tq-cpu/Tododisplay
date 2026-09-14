@@ -285,9 +285,10 @@ def google_health_access_token():
 
 
 def _civil(dt):
-    """A CivilDateTime dict (date-only midnight) for the dailyRollUp range."""
-    return {"year": dt.year, "month": dt.month, "day": dt.day,
-            "hours": 0, "minutes": 0, "seconds": 0, "nanos": 0}
+    """A CivilDateTime for the dailyRollUp range. CivilDateTime nests a
+    required google.type.Date under `date`; `time` defaults to midnight when
+    omitted, which is exactly the day boundary we want."""
+    return {"date": {"year": dt.year, "month": dt.month, "day": dt.day}}
 
 
 def _gh_daily_rollup_raw(data_type, token, day=None, source_family=None):
