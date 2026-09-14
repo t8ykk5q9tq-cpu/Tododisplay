@@ -17,6 +17,7 @@ import shutil
 import smtplib
 import sqlite3
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -289,29 +290,41 @@ def _civil(dt):
             "hours": 0, "minutes": 0, "seconds": 0, "nanos": 0}
 
 
-def _gh_daily_rollup(data_type, token, day=None):
-    """POST a 1-day dailyRollUp for `data_type` on `day` (default today) and
-    return the single rollup data point dict, or None. `token` is a valid
-    access token."""
+def _gh_daily_rollup_raw(data_type, token, day=None, source_family=None):
+    """POST a 1-day dailyRollUp and return the full parsed JSON response (or a
+    dict with an 'error' key). Used by both the normal fetch and the debug
+    endpoint so we can see exactly what the API returns."""
     day = day or date.today()
     nextday = day + timedelta(days=1)
     url = f"{GOOGLE_HEALTH_BASE}/users/me/dataTypes/{data_type}/dataPoints:dailyRollUp"
-    body = json.dumps({
+    payload = {
         "range": {"start": _civil(day), "end": _civil(nextday)},
         "windowSizeDays": 1,
-    }).encode()
+    }
+    if source_family:
+        payload["dataSourceFamily"] = f"users/me/dataSourceFamilies/{source_family}"
+    body = json.dumps(payload).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         })
         with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.load(r)
-        points = resp.get("rollupDataPoints", [])
-        return points[0] if points else None
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        print(f"Google Health {data_type} rollup HTTP {e.code}: {detail[:300]}")
+        return {"error": f"HTTP {e.code}", "detail": detail[:500]}
     except Exception as e:
         print(f"Google Health {data_type} rollup failed: {e}")
-        return None
+        return {"error": str(e)}
+
+
+def _gh_daily_rollup(data_type, token, day=None):
+    """Return the single rollup data point dict, or None."""
+    resp = _gh_daily_rollup_raw(data_type, token, day)
+    points = resp.get("rollupDataPoints", []) if isinstance(resp, dict) else []
+    return points[0] if points else None
 
 
 # Cache health data ~10 min to respect API rate limits.
@@ -669,6 +682,17 @@ def health_data_route():
             day = datetime.strptime(date_arg, "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"enabled": True, "error": "bad date, use YYYY-MM-DD"}), 400
+    # Debug: return the raw API responses so we can see exactly what Google
+    # sends for steps (default sources vs wearables) plus the list endpoint.
+    if request.args.get("debug") == "1":
+        token = google_health_access_token()
+        return jsonify({
+            "enabled": True,
+            "date": (day or date.today()).isoformat(),
+            "token_ok": bool(token),
+            "steps_all_sources": _gh_daily_rollup_raw("steps", token, day),
+            "steps_wearables": _gh_daily_rollup_raw("steps", token, day, "google-wearables"),
+        })
     d = health_data(force=request.args.get("force") == "1", day=day) or {}
     return jsonify({"enabled": True, "date": (day or date.today()).isoformat(), **d})
 
