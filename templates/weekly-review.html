@@ -52,6 +52,11 @@
         .bars .b { width: 100%; border-radius: 3px 3px 0 0; min-height: 3px; }
         .bars .v { font-size: 0.6rem; color: #8a8a9a; margin-bottom: 3px; }
         .bars .d { font-size: 0.65rem; color: #6a6a78; margin-top: 4px; }
+        /* Dense mode (30-day): tighter bars, no per-bar value labels, and only
+           every-5th day label so 30 columns fit cleanly. */
+        .bars.dense { gap: 2px; }
+        .bars.dense .v { display: none; }
+        .bars.dense .d { font-size: 0.55rem; margin-top: 2px; }
         .legend { display: flex; gap: 14px; font-size: 0.78rem; color: #8a8a9a; margin-top: 8px; }
         .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
         .empty { color: #8a8a9a; font-style: italic; }
@@ -109,6 +114,14 @@
                 (note ? `<div class="note ${noteCls || ""}">${note}</div>` : "") + `</div>`;
         }
 
+        // With many days, switch charts to a denser look and thin the labels.
+        function barsCls(labels) { return labels.length > 14 ? "bars dense" : "bars"; }
+        function dayLabel(labels, i) {
+            if (labels.length <= 14) return labels[i];
+            // Dense: show a label roughly every 5th day (and the last one).
+            return (i % 5 === 0 || i === labels.length - 1) ? labels[i] : "";
+        }
+
         // Simple single-series bar chart. rows: numbers; fmt(v)->top label.
         function barChart(title, note, labels, values, color, fmt) {
             const peak = Math.max(1, ...values);
@@ -117,11 +130,11 @@
                 const top = v > 0 ? fmt(v) : "";
                 return `<div class="col"><div class="v">${top}</div>` +
                     `<div class="b" style="height:${h}%;background:${v > 0 ? color : "#243056"}"></div>` +
-                    `<div class="d">${labels[i]}</div></div>`;
+                    `<div class="d">${dayLabel(labels, i)}</div></div>`;
             }).join("");
             return `<div class="chart"><h2>${title}</h2>` +
                 (note ? `<div class="cnote">${note}</div>` : "") +
-                `<div class="bars">${bars}</div></div>`;
+                `<div class="${barsCls(labels)}">${bars}</div></div>`;
         }
 
         // Stacked bar chart (focus vs distraction). aVals/bVals per day.
@@ -137,11 +150,11 @@
                     `<div class="stack" style="height:${hTotal}%">` +
                         `<div class="seg" style="height:${bPct}%;background:${bCol}"></div>` +
                         `<div class="seg" style="height:${aPct}%;background:${aCol}"></div>` +
-                    `</div><div class="d">${labels[i]}</div></div>`;
+                    `</div><div class="d">${dayLabel(labels, i)}</div></div>`;
             }).join("");
             return `<div class="chart"><h2>${title}</h2>` +
                 (note ? `<div class="cnote">${note}</div>` : "") +
-                `<div class="bars">${bars}</div>` +
+                `<div class="${barsCls(labels)}">${bars}</div>` +
                 `<div class="legend"><span><span class="sw" style="background:${aCol}"></span>${aName}</span>` +
                 `<span><span class="sw" style="background:${bCol}"></span>${bName}</span></div></div>`;
         }
@@ -170,14 +183,14 @@
                     return pct > 0 ? `<div class="seg" style="height:${pct}%;background:${colorFor(ser, si)}"></div>` : "";
                 }).join("");
                 return `<div class="col"><div class="stack" style="height:${hTotal}%">${segs}</div>` +
-                    `<div class="d">${lab}</div></div>`;
+                    `<div class="d">${dayLabel(labels, i)}</div></div>`;
             }).join("");
             const legend = series.map((ser, si) =>
                 `<span><span class="sw" style="background:${colorFor(ser, si)}"></span>${ser.name}</span>`
             ).join("");
             return `<div class="chart"><h2>${title}</h2>` +
                 (note ? `<div class="cnote">${note}</div>` : "") +
-                `<div class="bars">${bars}</div>` +
+                `<div class="${barsCls(labels)}">${bars}</div>` +
                 `<div class="legend">${legend}</div></div>`;
         }
 
