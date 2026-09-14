@@ -1744,6 +1744,142 @@ def build_weekly_review():
     return "\n".join(lines)
 
 
+def weekly_review_data():
+    """Structured 7-day rollup for the weekly-review page. Per-day series
+    (oldest->newest) plus summary figures across focus/distraction, sleep,
+    habits, check-ins, mood, water, weight, and phone/computer usage."""
+    today = date.today()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    day_set = set(days)
+    labels = [datetime.fromisoformat(d).strftime("%a") for d in days]
+
+    # --- App usage (focus/distraction) per day + weekly totals ---
+    au = load_appuse()
+    totals_by_day = au.get("totals", {})
+    focus_by_day, distraction_by_day = [], []
+    focus_total = distraction_total = 0
+    for d in days:
+        f = s = 0
+        for a, secs in totals_by_day.get(d, {}).items():
+            k = classify_app(a)
+            if k == "focus":
+                f += secs
+            elif k == "distraction":
+                s += secs
+        focus_by_day.append(f)
+        distraction_by_day.append(s)
+        focus_total += f
+        distraction_total += s
+
+    # --- Phone + computer usage MINUTES per day (from the per-minute logs) ---
+    def _minutes_by_day(path):
+        data = {}
+        try:
+            with open(path) as f:
+                alld = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            alld = {}
+        out = []
+        for d in days:
+            day = alld.get(d, {})
+            n = len(day) if isinstance(day, (dict, list)) else 0
+            out.append(n)
+        return out
+    phone_min = _minutes_by_day(USAGE_MIN_FILE)
+    mac_min = _minutes_by_day(MAC_USAGE_MIN_FILE)
+
+    # --- Sleep per night (from the weekly summary) ---
+    sl = sleep_summary_week()
+    sleep_by_day = {n["date"]: n["duration_min"] for n in sl.get("nights", [])}
+    sleep_series = [sleep_by_day.get(d, 0) for d in days]
+
+    # --- Habits: completions vs opportunities ---
+    habit_done = habit_total = 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        hc = conn.execute("SELECT COUNT(*) c FROM habits").fetchone()["c"]
+        done = sum(1 for r in conn.execute("SELECT day FROM habit_log").fetchall()
+                   if r["day"] in day_set)
+        conn.close()
+        habit_done, habit_total = done, hc * 7
+    except sqlite3.Error:
+        pass
+
+    # --- Check-ins per day ---
+    checkin_by_day = {d: 0 for d in days}
+    for e in load_log():
+        d = str(e.get("timestamp", ""))[:10]
+        if d in checkin_by_day:
+            checkin_by_day[d] += 1
+    checkin_series = [checkin_by_day[d] for d in days]
+    checkin_total = sum(checkin_series)
+
+    # --- Mood: per-day average + weekly average ---
+    mood_sum, mood_cnt = {}, {}
+    for m in load_moods():
+        d = str(m.get("timestamp", ""))[:10]
+        if d in day_set:
+            mood_sum[d] = mood_sum.get(d, 0) + m["value"]
+            mood_cnt[d] = mood_cnt.get(d, 0) + 1
+    mood_series = [round(mood_sum[d] / mood_cnt[d], 1) if mood_cnt.get(d) else 0
+                   for d in days]
+    week_mood_vals = [mood_sum[d] / mood_cnt[d] for d in days if mood_cnt.get(d)]
+    mood_avg = round(sum(week_mood_vals) / len(week_mood_vals), 1) if week_mood_vals else None
+
+    # --- Water: bottles per day + goal-hit count ---
+    water = load_water()
+    water_series = [round(float(water.get(d, 0) or 0), 1) for d in days]
+    water_hits = sum(1 for v in water_series if v >= WATER_GOAL)
+    water_logged = sum(1 for v in water_series if v > 0)
+
+    # --- Weight change over the window ---
+    m = metric_recent(days=30)
+    wk_points = [p for p in m.get("points", []) if p["date"] in day_set]
+    weight_change = (round(wk_points[-1]["value"] - wk_points[0]["value"], 2)
+                     if len(wk_points) >= 2 else None)
+    weight_latest = wk_points[-1]["value"] if wk_points else None
+
+    # --- Steps per day (Google Health), if enabled ---
+    steps_series = None
+    if google_health_enabled():
+        wk = health_week() or {}
+        steps_map = {r["date"]: r["steps"] for r in wk.get("steps_week", [])}
+        steps_series = [steps_map.get(d, 0) for d in days]
+
+    return {
+        "days": days, "labels": labels,
+        "focus": {"total_sec": focus_total, "distraction_sec": distraction_total,
+                  "focus_by_day": focus_by_day, "distraction_by_day": distraction_by_day},
+        "usage": {"phone_min": phone_min, "mac_min": mac_min,
+                  "phone_total": sum(phone_min), "mac_total": sum(mac_min)},
+        "sleep": {"series_min": sleep_series,
+                  "avg_duration_min": sl.get("avg_duration_min"),
+                  "avg_bedtime_min": sl.get("avg_bedtime_min"),
+                  "bedtime_regularity_min": sl.get("bedtime_regularity_min"),
+                  "nights": len(sl.get("nights", []))},
+        "habits": {"done": habit_done, "total": habit_total,
+                   "percent": int(round(habit_done / habit_total * 100)) if habit_total else 0},
+        "checkins": {"series": checkin_series, "total": checkin_total},
+        "mood": {"series": mood_series, "avg": mood_avg},
+        "water": {"series": water_series, "goal": WATER_GOAL,
+                  "hits": water_hits, "logged": water_logged},
+        "weight": {"change": weight_change, "latest": weight_latest,
+                   "label": METRIC_LABEL, "unit": METRIC_UNIT},
+        "steps": {"series": steps_series},
+    }
+
+
+@app.route("/weekly-review-data")
+def weekly_review_data_route():
+    return jsonify(weekly_review_data())
+
+
+@app.route("/weekly-review")
+def weekly_review_page():
+    return render_template("weekly-review.html")
+
+
 def weekly_review_push_thread():
     """Send the weekly review once, on WEEKLY_REVIEW_DOW at WEEKLY_REVIEW_HOUR."""
     if WEEKLY_REVIEW_HOUR < 0:
