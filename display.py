@@ -413,6 +413,30 @@ def read_journal_today():
         return ""
 
 
+# Health data lives in the tracker process (port 5050). Fetch it over localhost
+# in a background thread so the draw loop never blocks on the network.
+_health_data = {"data": None}
+_health_lock = threading.Lock()
+
+
+def _health_poll_thread():
+    url = "http://127.0.0.1:5050/health-data"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=8) as r:
+                d = json.load(r)
+            with _health_lock:
+                _health_data["data"] = d if d.get("enabled") else None
+        except Exception:
+            pass  # keep last value on failure
+        time.sleep(300)  # refresh every 5 min
+
+
+def read_health():
+    with _health_lock:
+        return _health_data["data"]
+
+
 def read_tracker():
     """Read the time-tracker log + state. Returns a dict with recent check-ins
     and seconds until the next check-in, or None if the tracker isn't set up."""
@@ -903,6 +927,80 @@ def draw_app_opens(screen, fonts, rect, tracker):
             line_y += val_font.get_height() + 3
 
 
+def draw_health(screen, fonts, rect, health):
+    """Draw a compact health band: steps (with goal bar), sleep, resting HR,
+    active minutes — laid out as columns across the width."""
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
+    pad = 16
+    title = fonts["clock"].render("Health", True, HEADER_COLOR)
+    screen.blit(title, (x + pad, y + pad))
+
+    val_font = fonts["item"]
+    lab_font = fonts["tiny"]
+    # Content row starts below the title.
+    cy = y + pad + title.get_height() + 8
+    # Four columns across the band.
+    cols = 4
+    col_w = (w - 2 * pad) // cols
+
+    def draw_stat(ci, label, value, sub=None, bar=None, value_color=HEADER_COLOR):
+        cx = x + pad + ci * col_w
+        lab = lab_font.render(label, True, DONE_COLOR)
+        screen.blit(lab, (cx, cy))
+        val = val_font.render(value, True, value_color)
+        screen.blit(val, (cx, cy + lab.get_height() + 4))
+        vy = cy + lab.get_height() + 4 + val.get_height()
+        if bar is not None:
+            bw = col_w - 12
+            bh = 8
+            by = vy + 6
+            pygame.draw.rect(screen, (15, 52, 96),
+                             pygame.Rect(cx, by, bw, bh), border_radius=4)
+            fillw = int(bw * max(0, min(1, bar)))
+            fill_col = (46, 204, 113) if bar >= 1 else HEADER_COLOR
+            if fillw > 0:
+                pygame.draw.rect(screen, fill_col,
+                                 pygame.Rect(cx, by, fillw, bh), border_radius=4)
+        elif sub:
+            s = lab_font.render(sub, True, TEXT_COLOR)
+            screen.blit(s, (cx, vy + 4))
+
+    # Steps
+    steps = health.get("steps")
+    goal = health.get("steps_goal") or 10000
+    if steps is not None:
+        frac = steps / goal if goal else 0
+        draw_stat(0, "STEPS", f"{steps:,}", bar=frac)
+    else:
+        draw_stat(0, "STEPS", "--")
+
+    # Sleep
+    sl = health.get("sleep")
+    if sl and sl.get("duration_min") is not None:
+        dm = sl["duration_min"]
+        dur = f"{dm // 60}h {dm % 60}m"
+
+        def _t(iso):
+            try:
+                d = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+                return d.strftime("%H:%M")
+            except (ValueError, AttributeError):
+                return "--"
+        sub = f"{_t(sl.get('bedtime'))}\u2192{_t(sl.get('waketime'))}"
+        draw_stat(1, "SLEEP", dur, sub=sub)
+    else:
+        draw_stat(1, "SLEEP", "--")
+
+    # Resting HR
+    hr = health.get("resting_hr")
+    draw_stat(2, "RESTING HR", f"{hr} bpm" if hr is not None else "--")
+
+    # Active minutes
+    am = health.get("active_minutes")
+    draw_stat(3, "ACTIVE", f"{am} min" if am is not None else "--")
+
+
 def draw_tracker(screen, fonts, rect, tracker):
     """Draw the time-tracker band: next check-in countdown + recent check-ins."""
     x, y, w, h = rect
@@ -1066,6 +1164,7 @@ def main():
     threading.Thread(target=weather_thread, daemon=True).start()
     threading.Thread(target=power_thread, daemon=True).start()
     threading.Thread(target=net_thread, daemon=True).start()
+    threading.Thread(target=_health_poll_thread, daemon=True).start()
 
     # Fullscreen at the display's native resolution
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
@@ -1116,6 +1215,7 @@ def main():
     habits_data = []
     focus_text = ""
     journal_text = ""
+    health_data_val = None
     update_str = last_update_str()
     ram_str = ram_usage_str()
 
@@ -1138,6 +1238,7 @@ def main():
             habits_data = read_habits()
             focus_text = read_focus()
             journal_text = read_journal_today()
+            health_data_val = read_health()
             update_str = last_update_str()
             ram_str = ram_usage_str()
             last_tick = now
@@ -1274,9 +1375,19 @@ def main():
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
+        # Health band (steps/sleep/HR/active) — a compact single-row band.
+        health_h = 0
+        if health_data_val:
+            health_h = (fonts["clock"].get_height() + 8       # title
+                        + fonts["tiny"].get_height() + 4      # label row
+                        + fonts["item"].get_height()          # value row
+                        + 14 + 2 * 16)                        # bar + padding
+
         # Side-by-side full-height columns: Todo left, Shopping right. Their
-        # height shrinks to leave room for the habit row, tracker band + clock.
+        # height shrinks to leave room for the health band, habit row,
+        # tracker band + clock.
         below = clock_h
+        below += (health_h + gap) if health_h else 0
         below += (habits_h + gap) if habits_h else 0
         below += (tracker_h + gap) if tracker_h else 0
         panel_w = (sw - 2 * margin - gap) // 2
@@ -1288,8 +1399,13 @@ def main():
                    (margin + panel_w + gap, top, panel_w, panel_h),
                    "Shopping List", shopping_items)
 
-        # Stack below the lists: habit row, then time-tracker band.
+        # Stack below the lists: health band, habit row, then time-tracker band.
         cursor_y = top + panel_h + gap
+        if health_h:
+            draw_health(canvas, fonts,
+                        (margin, cursor_y, sw - 2 * margin, health_h),
+                        health_data_val)
+            cursor_y += health_h + gap
         if habits_h:
             draw_habits(canvas, fonts,
                         (margin, cursor_y, sw - 2 * margin, habits_h), habits_data)
