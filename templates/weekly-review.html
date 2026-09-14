@@ -158,7 +158,11 @@
             $("stats").innerHTML =
                 statCard("Focus", fmtHrs(foc.total_sec), "", `${fmtHrs(foc.distraction_sec)} distraction`) +
                 statCard("Avg Sleep", sl.avg_duration_min ? fmtMin(sl.avg_duration_min) : "--", "",
-                         sl.bedtime_regularity_min != null ? `bed \u00b1${sl.bedtime_regularity_min}m, avg ${fmtClock(sl.avg_bedtime_min)}` : `${sl.nights} nights`) +
+                         `${sl.nights} nights`) +
+                statCard("Avg Bedtime", fmtClock(sl.avg_bedtime_min), "",
+                         sl.bedtime_regularity_min != null ? `\u00b1${sl.bedtime_regularity_min} min` : "") +
+                statCard("Avg Wake", fmtClock(sl.avg_waketime_min), "",
+                         sl.waketime_regularity_min != null ? `\u00b1${sl.waketime_regularity_min} min` : "") +
                 statCard("Habits", hab.percent + "%", "", `${hab.done}/${hab.total} done`) +
                 statCard("Check-ins", ci.total, "", "logged this week") +
                 statCard("Avg Mood", mo.avg != null ? mo.avg : "--", mo.avg != null ? "/5" : "", "") +
