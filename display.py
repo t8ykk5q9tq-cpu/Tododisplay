@@ -1049,9 +1049,14 @@ def draw_usage_pies(screen, fonts, rect, usage_map,
     pad = 18
     lab_font = fonts["tiny"]
 
-    # Title
+    # Title (left) + full-day total (right). Total = all used minutes today.
     title = lab_font.render(title_text, True, HEADER_COLOR)
     screen.blit(title, (x + pad, y + pad))
+    total_min = len(usage_map)
+    tot_str = (f"{total_min // 60}h {total_min % 60}m today" if total_min >= 60
+               else f"{total_min}m today")
+    tot_surf = lab_font.render(tot_str, True, TEXT_COLOR)
+    screen.blit(tot_surf, (x + w - pad - tot_surf.get_width(), y + pad))
 
     now = datetime.now()
     now_mod = now.hour * 60 + now.minute        # current minute-of-day
