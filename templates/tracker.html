@@ -107,14 +107,14 @@
         .spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-top: 0.5rem; }
         .spark .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
         .spark .b { width: 100%; background: #00d4ff; border-radius: 2px 2px 0 0; min-height: 3px; }
-        /* Nav links */
-        .nav { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
-        .nav a {
+        /* Shared site nav */
+        .site-nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+        .site-nav a {
             padding: 0.4rem 0.9rem; border-radius: 999px; background: #16213e;
-            color: #00d4ff; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+            color: #00d4ff; text-decoration: none; font-size: 0.85rem; font-weight: 600;
             border: 1px solid #22284a;
         }
-        .nav a:active { background: #0f3460; }
+        .site-nav a.active { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
         /* Journal */
         .journal-form { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; }
         .journal-form input {
@@ -149,10 +149,25 @@
 </head>
 <body>
     <h1>Time Tracker</h1>
-    <div class="nav">
-        <a href="/usage">Screen Usage</a>
-        <a href="/health">Health</a>
-    </div>
+    <nav class="site-nav" id="site-nav"></nav>
+    <script>
+    (function () {
+        var host = location.hostname, proto = location.protocol;
+        var p5000 = proto + "//" + host + ":5000", p5050 = proto + "//" + host + ":5050";
+        var here = location.port + location.pathname.replace(/\/$/, "");
+        var links = [
+            ["Lists", p5000 + "/", "5000"],
+            ["Board", p5000 + "/board", "5000/board"],
+            ["Tracker", p5050 + "/", "5050"],
+            ["Usage", p5050 + "/usage", "5050/usage"],
+            ["Health", p5050 + "/health", "5050/health"],
+        ];
+        document.getElementById("site-nav").innerHTML = links.map(function (l) {
+            var active = (here === l[2]) ? " class=\"active\"" : "";
+            return "<a href=\"" + l[1] + "\"" + active + ">" + l[0] + "</a>";
+        }).join("");
+    })();
+    </script>
 
     <div class="card countdown" id="countdown">
         <div class="time" id="cd-time">--:--</div>
