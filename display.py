@@ -703,10 +703,10 @@ def draw_panel(screen, fonts, rect, title, items):
     title_x = x + (w - title_surf.get_width()) // 2
     screen.blit(title_surf, (title_x, y + pad))
 
-    # Items
-    item_font = fonts["item"]
-    line_y = y + pad + title_surf.get_height() + 20
-    line_height = item_font.get_height() + 10
+    # Items (smaller list font + tighter spacing so more items fit per card)
+    item_font = fonts["list_item"]
+    line_y = y + pad + title_surf.get_height() + 16
+    line_height = item_font.get_height() + 6
     max_w = w - 2 * pad
     bottom = y + h - pad
 
@@ -1261,6 +1261,9 @@ def main():
         # Override any size with env vars, e.g. TITLE_PT=60 ITEM_PT=40 CLOCK_PT=28
         "title": make_font(int(os.environ.get("TITLE_PT", max(26, min(sw, sh) // 12))), bold=True),
         "item": make_font(int(os.environ.get("ITEM_PT", max(18, min(sw, sh) // 19)))),
+        # Smaller font just for the Todo/Shopping list items so more fit per
+        # card. Override with LIST_ITEM_PT.
+        "list_item": make_font(int(os.environ.get("LIST_ITEM_PT", max(14, min(sw, sh) // 25)))),
         "clock": make_font(int(os.environ.get("CLOCK_PT", max(14, min(sw, sh) // 27)))),
         "tiny": make_font(max(12, min(sw, sh) // 40)),
         # List panel headers (Todo / Shopping): 0.6x the full title size
