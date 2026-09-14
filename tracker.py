@@ -289,14 +289,15 @@ def _civil(dt):
             "hours": 0, "minutes": 0, "seconds": 0, "nanos": 0}
 
 
-def _gh_daily_rollup(data_type, token):
-    """POST a 1-day dailyRollUp for `data_type` (today) and return the single
-    rollup data point dict, or None. `token` is a valid access token."""
-    today = date.today()
-    tomorrow = today + timedelta(days=1)
+def _gh_daily_rollup(data_type, token, day=None):
+    """POST a 1-day dailyRollUp for `data_type` on `day` (default today) and
+    return the single rollup data point dict, or None. `token` is a valid
+    access token."""
+    day = day or date.today()
+    nextday = day + timedelta(days=1)
     url = f"{GOOGLE_HEALTH_BASE}/users/me/dataTypes/{data_type}/dataPoints:dailyRollUp"
     body = json.dumps({
-        "range": {"start": _civil(today), "end": _civil(tomorrow)},
+        "range": {"start": _civil(day), "end": _civil(nextday)},
         "windowSizeDays": 1,
     }).encode()
     try:
@@ -318,27 +319,29 @@ _gh_data = {"data": None, "fetched_at": 0}
 GH_CACHE_SEC = 600
 
 
-def health_data(force=False):
-    """Return today's {steps, steps_goal, resting_hr, active_minutes} from
-    Google Health, cached. None if the integration is disabled."""
+def health_data(force=False, day=None):
+    """Return {steps, steps_goal, resting_hr, active_minutes} for `day`
+    (default today) from Google Health. Today's result is cached; a specific
+    past date bypasses the cache. None if the integration is disabled."""
     if not google_health_enabled():
         return None
     now = time.time()
-    if (not force and _gh_data["data"] is not None
+    is_today = day is None
+    if (is_today and not force and _gh_data["data"] is not None
             and now < _gh_data["fetched_at"] + GH_CACHE_SEC):
         return _gh_data["data"]
     token = google_health_access_token()
     if not token:
-        return _gh_data["data"]  # serve stale on auth failure
+        return _gh_data["data"] if is_today else None  # serve stale on auth fail
 
     result = {"steps": None, "steps_goal": STEPS_GOAL,
               "resting_hr": None, "active_minutes": None}
 
-    steps_pt = _gh_daily_rollup("steps", token)
+    steps_pt = _gh_daily_rollup("steps", token, day)
     if steps_pt and "steps" in steps_pt:
         result["steps"] = int(steps_pt["steps"].get("countSum", 0))
 
-    hr_pt = _gh_daily_rollup("daily-resting-heart-rate", token)
+    hr_pt = _gh_daily_rollup("daily-resting-heart-rate", token, day)
     if hr_pt and "restingHeartRatePersonalRange" in hr_pt:
         rng = hr_pt["restingHeartRatePersonalRange"]
         lo = rng.get("beatsPerMinuteMin")
@@ -348,7 +351,7 @@ def health_data(force=False):
         elif lo is not None:
             result["resting_hr"] = int(round(lo))
 
-    am_pt = _gh_daily_rollup("active-minutes", token)
+    am_pt = _gh_daily_rollup("active-minutes", token, day)
     if am_pt and "activeMinutes" in am_pt:
         # ActiveMinutesRollupValue aggregates minutes; sum field name varies,
         # so pull the first numeric *_sum value present.
@@ -361,8 +364,9 @@ def health_data(force=False):
                 except (ValueError, TypeError):
                     pass
 
-    _gh_data["data"] = result
-    _gh_data["fetched_at"] = now
+    if is_today:
+        _gh_data["data"] = result
+        _gh_data["fetched_at"] = now
     return result
 
 
@@ -653,12 +657,20 @@ def usage_data():
 
 @app.route("/health-data")
 def health_data_route():
-    """Today's Google Health summary (steps/resting HR/active minutes).
-    Returns {enabled: false} if the integration isn't configured."""
+    """Google Health summary (steps/resting HR/active minutes). Defaults to
+    today; ?date=YYYY-MM-DD queries a specific day (useful for testing since
+    past days are fully synced). Returns {enabled: false} if not configured."""
     if not google_health_enabled():
         return jsonify({"enabled": False})
-    d = health_data(force=request.args.get("force") == "1") or {}
-    return jsonify({"enabled": True, **d})
+    day = None
+    date_arg = request.args.get("date")
+    if date_arg:
+        try:
+            day = datetime.strptime(date_arg, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"enabled": True, "error": "bad date, use YYYY-MM-DD"}), 400
+    d = health_data(force=request.args.get("force") == "1", day=day) or {}
+    return jsonify({"enabled": True, "date": (day or date.today()).isoformat(), **d})
 
 
 @app.route("/log", methods=["GET"])
