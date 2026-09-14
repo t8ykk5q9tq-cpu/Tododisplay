@@ -30,6 +30,7 @@ WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")
 USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")
+MAC_USAGE_MIN_FILE = os.path.join(BASE_DIR, "mac_usage_minutes.json")
 WATER_GOAL = int(os.environ.get("WATER_GOAL", "3"))
 METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
 METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
@@ -414,11 +415,12 @@ def read_journal_today():
         return ""
 
 
-def read_usage_today():
-    """Return today's {minute_of_day(int): app} phone-usage map, or {}."""
+def read_usage_today(path=USAGE_MIN_FILE):
+    """Return today's {minute_of_day(int): app} usage map for the given usage
+    file (phone default, or the Mac one), or {}."""
     today = datetime.now().date().isoformat()
     try:
-        with open(USAGE_MIN_FILE) as f:
+        with open(path) as f:
             day = json.load(f).get(today, {})
         if isinstance(day, list):     # legacy format: bare minute list
             return {int(m): "" for m in day}
@@ -1035,18 +1037,20 @@ def draw_health(screen, fonts, rect, health):
         draw_stat(4, "MOOD", "--")
 
 
-def draw_usage_pies(screen, fonts, rect, usage_map):
-    """Draw the last 5 hours of phone usage as a clean horizontal timeline:
-    one wide bar, oldest (5h ago) on the left -> now on the right, with a red
-    slice for each used minute over a dim base, hour gridlines/labels, and a
-    'now' marker. `usage_map` is {minute_of_day: app}."""
+def draw_usage_pies(screen, fonts, rect, usage_map,
+                    title_text="Phone use \u2014 last 5 hours",
+                    used_col=(233, 69, 96)):
+    """Draw the last 5 hours of usage as a clean horizontal timeline: one wide
+    bar, oldest (5h ago) on the left -> now on the right, with a coloured slice
+    for each used minute over a dim base, hour gridlines/labels, and a 'now'
+    marker. `usage_map` is {minute_of_day: app}."""
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
     pad = 18
     lab_font = fonts["tiny"]
 
     # Title
-    title = lab_font.render("Phone use \u2014 last 5 hours", True, HEADER_COLOR)
+    title = lab_font.render(title_text, True, HEADER_COLOR)
     screen.blit(title, (x + pad, y + pad))
 
     now = datetime.now()
@@ -1076,8 +1080,7 @@ def draw_usage_pies(screen, fonts, rect, usage_map):
         pygame.draw.rect(screen, grid_col, pygame.Rect(gx, bar_top, 1, bar_h))
         hm += 60
 
-    # Used minutes -> red slices.
-    used_col = (233, 69, 96)
+    # Used minutes -> coloured slices.
     for md in usage_map:
         if start_mod <= md <= now_mod:
             sx = bar_x + int((md - start_mod) * px_per_min)
@@ -1271,6 +1274,7 @@ def main():
     journal_text = ""
     health_data_val = None
     usage_map = {}
+    mac_usage_map = {}
     update_str = last_update_str()
     ram_str = ram_usage_str()
 
@@ -1295,6 +1299,7 @@ def main():
             journal_text = read_journal_today()
             health_data_val = read_health()
             usage_map = read_usage_today()
+            mac_usage_map = read_usage_today(MAC_USAGE_MIN_FILE)
             update_str = last_update_str()
             ram_str = ram_usage_str()
             last_tick = now
@@ -1466,14 +1471,11 @@ def main():
                         + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
                         + 2 * 20)                             # top+bottom padding
 
-        # Usage timeline card (last 5 hours of phone use) — sits under habits.
-        usage_h = 0
-        if usage_map:
-            tiny = fonts["tiny"].get_height()
-            usage_h = (tiny + 8          # title
-                       + 28              # timeline bar
-                       + tiny + 3        # hour labels
-                       + 2 * 18)         # padding
+        # Usage timeline cards (last 5 hours) — phone, then computer, under habits.
+        tiny = fonts["tiny"].get_height()
+        usage_card_h = tiny + 8 + 28 + tiny + 3 + 2 * 18   # title+bar+labels+pad
+        usage_h = usage_card_h if usage_map else 0
+        mac_usage_h = usage_card_h if mac_usage_map else 0
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
         # height shrinks to leave room for the health band, habit row, usage
@@ -1482,6 +1484,7 @@ def main():
         below += (health_h + gap) if health_h else 0
         below += (habits_h + gap) if habits_h else 0
         below += (usage_h + gap) if usage_h else 0
+        below += (mac_usage_h + gap) if mac_usage_h else 0
         below += (tracker_h + gap) if tracker_h else 0
         panel_w = (sw - 2 * margin - gap) // 2
         panel_h = sh - top - margin - below
@@ -1515,6 +1518,13 @@ def main():
             draw_usage_pies(canvas, fonts,
                             (margin, cursor_y, sw - 2 * margin, usage_h), usage_map)
             cursor_y += usage_h + gap
+        if mac_usage_h:
+            draw_usage_pies(canvas, fonts,
+                            (margin, cursor_y, sw - 2 * margin, mac_usage_h),
+                            mac_usage_map,
+                            title_text="Computer use \u2014 last 5 hours",
+                            used_col=(0, 212, 255))  # cyan for Mac/focus
+            cursor_y += mac_usage_h + gap
         if tracker_data is not None:
             band_w = sw - 2 * margin
             # Split the band: tracker on the left, App Opens box on the right.
