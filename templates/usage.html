@@ -64,6 +64,13 @@
         .wbars .b.empty { background: #243056; }
         .wbars .d { font-size: 0.6rem; color: #6a6a78; margin-top: 2px; }
         .empty-note { color: #8a8a9a; font-style: italic; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .tab {
+            padding: 7px 18px; border-radius: 999px; border: 1px solid #2a2f4a;
+            background: #16213e; color: #8a8a9a; font-size: 0.95rem;
+            cursor: pointer; font-weight: 600;
+        }
+        .tab.active { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
     </style>
 </head>
 <body>
@@ -72,12 +79,17 @@
             <h1>Screen Usage</h1>
             <div class="sub" id="date">Loading...</div>
         </div>
-        <div class="total"><span class="v" id="total">--</span> min on phone today</div>
+        <div class="total"><span class="v" id="total">--</span> <span id="total-label">min on phone today</span></div>
         <div class="legend" id="legend"></div>
     </header>
 
+    <div class="tabs">
+        <button class="tab active" id="tab-phone" data-source="phone">Phone</button>
+        <button class="tab" id="tab-mac" data-source="mac">Mac</button>
+    </div>
+
     <div class="ribbon-wrap">
-        <div class="ribbon-title">Full day &mdash; midnight to midnight</div>
+        <div class="ribbon-title" id="ribbon-title">Last 2 hours</div>
         <div id="ribbon"></div>
     </div>
 
@@ -107,6 +119,7 @@
         const HUB = "#16213e";
         let COLORS = {};              // app -> hex, from the API
         let DEFAULT_COLOR = "#9b6dff";
+        let SOURCE = "phone";         // "phone" or "mac" — set by the tabs
 
         function colorFor(app) {
             if (!app) return DEFAULT_COLOR;      // used, app unknown (legacy)
@@ -189,7 +202,7 @@
         async function refresh() {
             let d;
             try {
-                d = await (await fetch("/usage-data", { cache: "no-store" })).json();
+                d = await (await fetch("/usage-data?source=" + SOURCE, { cache: "no-store" })).json();
                 document.getElementById("net").textContent = "";
             } catch (e) {
                 document.getElementById("net").textContent = "Offline - retrying...";
@@ -211,6 +224,8 @@
 
             document.getElementById("date").textContent = d.date || "";
             document.getElementById("total").textContent = d.total_minutes ?? 0;
+            document.getElementById("total-label").textContent =
+                (SOURCE === "mac") ? "min on Mac today" : "min on phone today";
             renderLegend(d.per_app || {});
             document.getElementById("ribbon").innerHTML = buildRibbon(mins);
             renderAppToday(d.app_today);
@@ -292,6 +307,16 @@
                     + `<span class="t">${fmtDur(a.seconds)}</span></div><div class="wbars">${bars}</div></div>`;
             }).join("");
         }
+
+        // Tab switcher: Phone / Mac.
+        function selectTab(source) {
+            SOURCE = source;
+            document.getElementById("tab-phone").classList.toggle("active", source === "phone");
+            document.getElementById("tab-mac").classList.toggle("active", source === "mac");
+            refresh();
+        }
+        document.getElementById("tab-phone").addEventListener("click", () => selectTab("phone"));
+        document.getElementById("tab-mac").addEventListener("click", () => selectTab("mac"));
 
         setInterval(refresh, 30000);
         refresh();

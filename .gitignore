@@ -27,6 +27,7 @@ water_log.json
 metric_log.json
 journal_log.json
 usage_minutes.json
+mac_usage_minutes.json
 compliance.json
 pushover_count.json
 

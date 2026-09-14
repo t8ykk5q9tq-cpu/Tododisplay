@@ -52,7 +52,8 @@ SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")   # sleep/wake events
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")   # water bottles (1 L) per day
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")  # daily numeric metric (weight)
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")  # one line per day
-USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")  # active minute-of-day indices per date
+USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")  # phone: minute-of-day -> app per date
+MAC_USAGE_MIN_FILE = os.path.join(BASE_DIR, "mac_usage_minutes.json")  # Mac: minute-of-day -> app per date
 DB_PATH = os.path.join(BASE_DIR, "lists.db")  # habits live in the list app's DB
 
 # ======================================================================
@@ -435,28 +436,63 @@ USAGE_APP_COLORS = {
 }
 USAGE_DEFAULT_COLOR = "#9b6dff"  # violet: used, but app unknown
 
+# A rotating palette for Mac apps (assigned dynamically to the top apps of the
+# day; the rest fall into "Other").
+MAC_PALETTE = [
+    "#00d4ff", "#2ecc71", "#f5a623", "#e94560", "#c13584",
+    "#1da1f2", "#ff8c42", "#9b6dff",
+]
+MAC_TOP_N = 6  # distinct colors; apps beyond this become "Other"
+
 
 @app.route("/usage-data")
 def usage_data():
     """Return per-minute app usage for a date (default today) plus the color
-    map. Usage: /usage-data or /usage-data?date=YYYY-MM-DD.
+    map. Usage: /usage-data[?date=YYYY-MM-DD][&source=phone|mac].
     'minutes' maps minute-of-day (as string) -> app name (may be '')."""
     day = request.args.get("date") or date.today().isoformat()
-    raw = load_usage_minutes().get(day, {})
+    source = (request.args.get("source") or "phone").lower()
+    is_mac = source == "mac"
+
+    path = MAC_USAGE_MIN_FILE if is_mac else USAGE_MIN_FILE
+    raw = load_usage_minutes(path).get(day, {})
     # Support the legacy list format (bare minute indices, no app).
     if isinstance(raw, list):
         minute_map = {str(m): "" for m in raw}
     elif isinstance(raw, dict):
-        minute_map = raw
+        minute_map = dict(raw)
     else:
         minute_map = {}
-    # Per-app totals for the legend.
-    per_app = {}
-    for app_name in minute_map.values():
-        key = app_name or "Other"
-        per_app[key] = per_app.get(key, 0) + 1
-    colors = dict(USAGE_APP_COLORS)
-    colors["Other"] = USAGE_DEFAULT_COLOR
+
+    if is_mac:
+        # Strip the "Mac:" prefix for display, tally, then assign the top-N
+        # apps distinct palette colors and lump the rest into "Other".
+        clean = {}
+        for k, v in minute_map.items():
+            clean[k] = (v or "").replace("Mac:", "") or "Other"
+        minute_map = clean
+        tally = {}
+        for a in minute_map.values():
+            tally[a] = tally.get(a, 0) + 1
+        ranked = sorted(tally, key=lambda a: -tally[a])
+        colors = {}
+        for i, a in enumerate(ranked[:MAC_TOP_N]):
+            colors[a] = MAC_PALETTE[i % len(MAC_PALETTE)]
+        colors["Other"] = USAGE_DEFAULT_COLOR
+        # Fold non-top apps into "Other" in both the map and the tally.
+        top_set = set(ranked[:MAC_TOP_N])
+        per_app = {}
+        for k, a in minute_map.items():
+            key = a if a in top_set else "Other"
+            minute_map[k] = key
+            per_app[key] = per_app.get(key, 0) + 1
+    else:
+        per_app = {}
+        for app_name in minute_map.values():
+            key = app_name or "Other"
+            per_app[key] = per_app.get(key, 0) + 1
+        colors = dict(USAGE_APP_COLORS)
+        colors["Other"] = USAGE_DEFAULT_COLOR
 
     # Extra screen/Mac info for the summary cards (only for today's view).
     app_today = None
@@ -471,10 +507,11 @@ def usage_data():
 
     return jsonify({
         "date": day,
-        "minutes": minute_map,            # {"636": "YouTube", ...}
+        "source": source,
+        "minutes": minute_map,            # {"636": "Kiro"/"YouTube", ...}
         "total_minutes": len(minute_map),
-        "per_app": per_app,               # {"YouTube": 12, ...}
-        "colors": colors,                 # {"YouTube": "#e94560", ...}
+        "per_app": per_app,               # {"Kiro": 40, ...}
+        "colors": colors,                 # {"Kiro": "#00d4ff", ...}
         "default_color": USAGE_DEFAULT_COLOR,
         "app_today": app_today,           # [{app, seconds, opens, over_limit}]
         "focus": focus,                   # {focus_sec, distraction_sec, longest_focus_sec}
@@ -585,31 +622,32 @@ def normalize_app_name(raw):
     return _CANON_APPS.get(key.lower(), key)
 
 
-def load_usage_minutes():
-    """Return {'YYYY-MM-DD': [minute_of_day, ...]} of minutes with phone use."""
-    if os.path.exists(USAGE_MIN_FILE):
+def load_usage_minutes(path=USAGE_MIN_FILE):
+    """Return {'YYYY-MM-DD': {minute: app}} for the given usage-minutes file."""
+    if os.path.exists(path):
         try:
-            with open(USAGE_MIN_FILE) as f:
+            with open(path) as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
     return {}
 
 
-def save_usage_minutes(data):
-    with open(USAGE_MIN_FILE, "w") as f:
+def save_usage_minutes(data, path=USAGE_MIN_FILE):
+    with open(path, "w") as f:
         json.dump(data, f)
 
 
-def mark_usage_minute(app, when=None):
+def mark_usage_minute(app, when=None, path=USAGE_MIN_FILE):
     """Record that `app` was used during the given datetime's minute-of-day
     (0..1439) for that date. Stored as {date: {minute: app}} with last-wins on
-    same-minute app switches. Keeps ~60 days of history. No-op-safe on errors."""
+    same-minute app switches. Keeps ~60 days of history. No-op-safe on errors.
+    `path` selects which usage file (phone default, or the Mac one)."""
     when = when or datetime.now()
     day = when.date().isoformat()
     minute = str(when.hour * 60 + when.minute)  # JSON keys must be strings
     try:
-        data = load_usage_minutes()
+        data = load_usage_minutes(path)
         day_map = data.get(day)
         # Migrate an old-format day (a bare list of minutes) to the new map.
         if isinstance(day_map, list):
@@ -622,7 +660,7 @@ def mark_usage_minute(app, when=None):
         if len(data) > 60:
             for old in sorted(data)[:-60]:
                 data.pop(old, None)
-        save_usage_minutes(data)
+        save_usage_minutes(data, path)
     except (OSError, json.JSONDecodeError):
         pass
 
@@ -795,6 +833,12 @@ def active_batch():
         streaks["current"] += focus_secs
         streaks["longest"] = max(streaks["longest"], streaks["current"])
     save_appuse(data)  # single write for the whole batch
+    # Stamp this minute with the dominant Mac app in the batch (most active
+    # seconds), for the Mac clock/ribbon view on the usage page.
+    mac_tallies = {n: s for n, s in tallies.items() if classify_app(n) == "focus"}
+    if mac_tallies:
+        top_mac = max(mac_tallies, key=mac_tallies.get)
+        mark_usage_minute(top_mac, path=MAC_USAGE_MIN_FILE)
     return "ok"
 
 
