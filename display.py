@@ -939,7 +939,7 @@ def draw_health(screen, fonts, rect, health):
     lab_font = fonts["tiny"]
     sub_font = fonts["tiny"]
 
-    cols = 4
+    cols = 5
     col_w = (w - 2 * pad) // cols
     # Row layout inside a column: label, value, third line (bar/sub).
     lab_h = lab_font.get_height()
@@ -1012,6 +1012,14 @@ def draw_health(screen, fonts, rect, health):
               f"{am}" if am is not None else "--",
               sub="min" if am is not None else None)
 
+    # Mood (latest /5 + average) — from the tracker data.
+    mood = health.get("mood")
+    if mood and mood.get("latest") is not None:
+        draw_stat(4, "MOOD", f"{mood['latest']}/5",
+                  sub=f"avg {mood['avg']:.1f}")
+    else:
+        draw_stat(4, "MOOD", "--")
+
 
 def draw_tracker(screen, fonts, rect, tracker):
     """Draw the time-tracker band: next check-in countdown + recent check-ins."""
@@ -1025,12 +1033,7 @@ def draw_tracker(screen, fonts, rect, tracker):
     title_surf = fonts["clock"].render("Time Tracker", True, HEADER_COLOR)
     screen.blit(title_surf, (x + pad, y + pad))
 
-    mood = tracker.get("mood")
-    if mood:
-        # Bundled font has no emoji, so show a worded mood: "Mood 4/5".
-        mood_surf = fonts["tiny"].render(
-            f"Mood {mood['latest']}/5  (avg {mood['avg']:.1f})", True, DONE_COLOR)
-        screen.blit(mood_surf, (x + pad + title_surf.get_width() + 16, y + pad + 6))
+    # (Mood moved to the Health band.)
 
     # Compliance line: check-ins done/expected, red + warning when behind.
     comp = tracker.get("compliance")
@@ -1389,8 +1392,11 @@ def main():
             # Merge today's water (from the tracker data) into the health dict
             # so the band can show it in place of resting HR.
             hd = dict(health_data_val)
-            if tracker_data is not None and tracker_data.get("water"):
-                hd["water"] = tracker_data["water"]
+            if tracker_data is not None:
+                if tracker_data.get("water"):
+                    hd["water"] = tracker_data["water"]
+                if tracker_data.get("mood"):
+                    hd["mood"] = tracker_data["mood"]
             draw_health(canvas, fonts,
                         (margin, cursor_y, sw - 2 * margin, health_h), hd)
             cursor_y += health_h + gap
