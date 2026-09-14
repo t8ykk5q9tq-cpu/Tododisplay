@@ -52,6 +52,15 @@
         .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
         .awake { background: #4caf50; }
         .asleep { background: #8a8a9a; }
+        /* Selectable tag chips */
+        .tag-label { font-size: 0.75rem; color: #8a8a9a; margin: 0.8rem 0 0.5rem;
+            text-transform: uppercase; letter-spacing: 0.05em; }
+        .tag-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        .tag-grid button {
+            padding: 0.55rem 0.9rem; border: 2px solid #0f3460; border-radius: 999px;
+            background: #0f3460; color: #eaeaea; font-size: 0.95rem; cursor: pointer;
+        }
+        .tag-grid button.selected { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
         /* Quick-pick category buttons */
         .quick-title { font-size: 0.85rem; color: #8a8a9a; margin-bottom: 0.6rem;
             text-transform: uppercase; letter-spacing: 0.05em; }
@@ -177,18 +186,15 @@
     <!-- Check-in compliance -->
     <div class="card" id="compliance-card"></div>
 
-    <!-- Quick-pick buttons: one tap logs that category -->
+    <!-- Check in: type what you did, pick a tag, log it -->
     <div class="card">
-        <div class="quick-title">Quick check-in</div>
-        <div class="quick-grid" id="quick-grid"></div>
-    </div>
-
-    <!-- Free-text with optional category -->
-    <div class="card">
+        <div class="quick-title">Check in</div>
         <form class="add-form" id="add-form">
-            <input type="text" id="entry" placeholder="Something else..." autocomplete="off">
+            <input type="text" id="entry" placeholder="What are you doing?" autocomplete="off">
             <button type="submit">Log</button>
         </form>
+        <div class="tag-label">Tag (optional)</div>
+        <div class="tag-grid" id="tag-grid"></div>
     </div>
 
     <!-- Mood check-in -->
@@ -561,17 +567,35 @@
         }
 
         let quickBuilt = false;
-        function buildQuickButtons(categories) {
+        let selectedTag = null;
+        function buildTagChips(categories) {
             if (quickBuilt || !categories) return;
-            const grid = document.getElementById("quick-grid");
+            const grid = document.getElementById("tag-grid");
             grid.innerHTML = "";
             categories.forEach(cat => {
                 const b = document.createElement("button");
+                b.type = "button";
                 b.textContent = cat;
-                b.addEventListener("click", () => logCheckin(cat, cat));
+                b.addEventListener("click", () => {
+                    if (selectedTag === cat) {
+                        // tap the selected chip again to clear it
+                        selectedTag = null;
+                        b.classList.remove("selected");
+                    } else {
+                        selectedTag = cat;
+                        grid.querySelectorAll("button").forEach(x => x.classList.remove("selected"));
+                        b.classList.add("selected");
+                    }
+                });
                 grid.appendChild(b);
             });
             quickBuilt = true;
+        }
+
+        function clearTagSelection() {
+            selectedTag = null;
+            const grid = document.getElementById("tag-grid");
+            grid.querySelectorAll("button.selected").forEach(x => x.classList.remove("selected"));
         }
 
         async function logCheckin(text, category) {
@@ -592,7 +616,7 @@
             if (!s) return;
             remaining = s.next_checkin_in;
             pending = s.notification_pending;
-            buildQuickButtons(s.categories);
+            buildTagChips(s.categories);
             renderRecent(s.recent);
             renderSummary(s.summary, s.total_checkins);
             renderCompliance(s.compliance);
@@ -634,9 +658,11 @@
             e.preventDefault();
             const input = document.getElementById("entry");
             const text = input.value.trim();
-            if (!text) return;
-            await logCheckin(text, null);
+            // Allow logging just a tag if no text is typed (uses the tag as text).
+            if (!text && !selectedTag) return;
+            await logCheckin(text || selectedTag, selectedTag);
             input.value = "";
+            clearTagSelection();
         });
 
         document.getElementById("wake-btn").addEventListener("click", async () => {
