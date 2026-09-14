@@ -934,15 +934,11 @@ def draw_health(screen, fonts, rect, health):
     x, y, w, h = rect
     pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
     pad = 20
-    title = fonts["clock"].render("Health", True, HEADER_COLOR)
-    screen.blit(title, (x + pad, y + pad))
 
     val_font = fonts["clock"]   # bigger values (matches the tracker band)
     lab_font = fonts["tiny"]
     sub_font = fonts["tiny"]
 
-    # Content area below the title, vertically centered in the leftover space.
-    content_top = y + pad + title.get_height() + 10
     cols = 4
     col_w = (w - 2 * pad) // cols
     # Row layout inside a column: label, value, third line (bar/sub).
@@ -950,9 +946,8 @@ def draw_health(screen, fonts, rect, health):
     val_h = val_font.get_height()
     third_h = max(sub_font.get_height(), 12)
     block_h = lab_h + 6 + val_h + 8 + third_h
-    # Center the block vertically in the remaining band height.
-    avail = (y + h) - content_top - pad
-    cy = content_top + max(0, (avail - block_h) // 2)
+    # No title now: center the stat block vertically across the whole card.
+    cy = y + max(pad, (h - block_h) // 2)
 
     def draw_stat(ci, label, value, sub=None, bar=None, value_color=HEADER_COLOR):
         cx = x + pad + ci * col_w
@@ -1388,14 +1383,13 @@ def main():
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
-        # Health band (steps/sleep/HR/active) — one row of stat columns.
+        # Health band (steps/sleep/HR/active) — one row of stat columns, no title.
         health_h = 0
         if health_data_val:
-            health_h = (fonts["clock"].get_height() + 10      # title
-                        + fonts["tiny"].get_height() + 6      # label row
+            health_h = (fonts["tiny"].get_height() + 6        # label row
                         + fonts["clock"].get_height() + 8     # value row (big)
                         + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
-                        + 2 * 20 + 10)                        # padding + slack
+                        + 2 * 20)                             # top+bottom padding
 
         # Side-by-side full-height columns: Todo left, Shopping right. Their
         # height shrinks to leave room for the health band, habit row,
