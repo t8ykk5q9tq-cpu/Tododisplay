@@ -996,11 +996,15 @@ def draw_health(screen, fonts, rect, health):
     else:
         draw_stat(1, "SLEEP", "--")
 
-    # Resting HR
-    hr = health.get("resting_hr")
-    draw_stat(2, "RESTING HR",
-              f"{hr}" if hr is not None else "--",
-              sub="bpm" if hr is not None else None)
+    # Water (1 L bottles) — from the tracker data, shown with a goal bar.
+    water = health.get("water")
+    if water and water.get("goal"):
+        b = water.get("bottles", 0)
+        b_str = f"{b:.1f}".rstrip("0").rstrip(".")
+        frac = b / water["goal"] if water["goal"] else 0
+        draw_stat(2, "WATER", f"{b_str}/{water['goal']}", bar=frac)
+    else:
+        draw_stat(2, "WATER", "--")
 
     # Active minutes
     am = health.get("active_minutes")
@@ -1410,9 +1414,13 @@ def main():
         # Stack below the lists: health band, habit row, then time-tracker band.
         cursor_y = top + panel_h + gap
         if health_h:
+            # Merge today's water (from the tracker data) into the health dict
+            # so the band can show it in place of resting HR.
+            hd = dict(health_data_val)
+            if tracker_data is not None and tracker_data.get("water"):
+                hd["water"] = tracker_data["water"]
             draw_health(canvas, fonts,
-                        (margin, cursor_y, sw - 2 * margin, health_h),
-                        health_data_val)
+                        (margin, cursor_y, sw - 2 * margin, health_h), hd)
             cursor_y += health_h + gap
         if habits_h:
             draw_habits(canvas, fonts,
