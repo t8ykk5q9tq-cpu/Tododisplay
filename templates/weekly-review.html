@@ -162,7 +162,7 @@
                 statCard("Habits", hab.percent + "%", "", `${hab.done}/${hab.total} done`) +
                 statCard("Check-ins", ci.total, "", "logged this week") +
                 statCard("Avg Mood", mo.avg != null ? mo.avg : "--", mo.avg != null ? "/5" : "", "") +
-                statCard("Water", wa.hits + "/7", "", "days goal hit") +
+                statCard("Water", (Math.round(wa.series.reduce((a, b) => a + b, 0) * 10) / 10), "bottles", `${wa.hits}/7 days goal hit`) +
                 statCard("Phone", fmtMin(us.phone_total), "", `Computer ${fmtMin(us.mac_total)}`) +
                 statCard(wt.label || "Weight", wt.latest != null ? wt.latest : "--", wt.latest != null ? wt.unit : "", wtNote, wtCls);
 
