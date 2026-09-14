@@ -1047,48 +1047,21 @@ def draw_tracker(screen, fonts, rect, tracker):
         # Draw just under the title line.
         screen.blit(c_surf, (x + pad, y + pad + title_surf.get_height() + 4))
 
-    # Sleep line: last night's duration + average bedtime (second sub-line).
-    sleep = tracker.get("sleep")
+    # Daily metric (e.g. weight) sub-line. Sleep + water moved to the Health
+    # band, so they're no longer shown here.
     comp_has_line = bool(comp and comp["expected"] > 0)
-    if sleep:
-        sub = fonts["tiny"].get_height() + 6
-        sleep_y = y + pad + title_surf.get_height() + 4 + (sub if comp_has_line else 0)
-        if sleep.get("in_bed") and sleep.get("last_dur_min") is None:
-            stext = "Sleep: in bed now"
-            scolor = DONE_COLOR
-        else:
-            dur = sleep.get("last_dur_min")
-            hh, mm = divmod(dur, 60) if dur is not None else (0, 0)
-            dstr = f"{hh}h {mm}m" if hh else f"{mm}m"
-            bm = sleep.get("avg_bed_min")
-            bstr = f"{(bm // 60) % 24:02d}:{bm % 60:02d}" if bm is not None else "--"
-            inbed = "  (in bed)" if sleep.get("in_bed") else ""
-            stext = f"Sleep: last {dstr}, avg bed {bstr}{inbed}"
-            scolor = HEADER_COLOR
-        s_surf = fonts["tiny"].render(stext, True, scolor)
-        screen.blit(s_surf, (x + pad, sleep_y))
-
-    # Water + daily metric line (third sub-line under the title).
-    water = tracker.get("water")
     metric = tracker.get("metric")
-    if water or metric:
+    metric_has_line = bool(metric and metric.get("latest") is not None)
+    if metric_has_line:
         sub = fonts["tiny"].get_height() + 6
-        n_above = (1 if comp_has_line else 0) + (1 if sleep else 0)
-        wm_y = y + pad + title_surf.get_height() + 4 + sub * n_above
-        parts = []
-        if water:
-            b = water['bottles']
-            b_str = f"{b:.1f}".rstrip("0").rstrip(".")
-            parts.append(f"Water {b_str}/{water['goal']}L")
-        if metric and metric.get("latest") is not None:
-            chg = ""
-            if metric.get("change"):
-                arrow = "\u2191" if metric["change"] > 0 else "\u2193"
-                chg = f" {arrow}{abs(metric['change'])}"
-            parts.append(f"{metric['label']} {metric['latest']}{metric['unit']}{chg}")
-        if parts:
-            wm_surf = fonts["tiny"].render("   ".join(parts), True, HEADER_COLOR)
-            screen.blit(wm_surf, (x + pad, wm_y))
+        m_y = y + pad + title_surf.get_height() + 4 + (sub if comp_has_line else 0)
+        chg = ""
+        if metric.get("change"):
+            arrow = "\u2191" if metric["change"] > 0 else "\u2193"
+            chg = f" {arrow}{abs(metric['change'])}"
+        mtext = f"{metric['label']} {metric['latest']}{metric['unit']}{chg}"
+        m_surf = fonts["tiny"].render(mtext, True, HEADER_COLOR)
+        screen.blit(m_surf, (x + pad, m_y))
 
     next_in = tracker.get("next_in")
     awake = tracker.get("is_awake", True)
@@ -1111,10 +1084,9 @@ def draw_tracker(screen, fonts, rect, tracker):
     comp = tracker.get("compliance")
     sub_h = fonts["tiny"].get_height() + 6
     comp_offset = sub_h if (comp and comp["expected"] > 0) else 0
-    sleep_offset = sub_h if tracker.get("sleep") else 0
-    wm_offset = sub_h if (tracker.get("water") or tracker.get("metric")) else 0
+    metric_offset = sub_h if metric_has_line else 0
     content_y = (y + pad + title_surf.get_height() + 12
-                 + comp_offset + sleep_offset + wm_offset)
+                 + comp_offset + metric_offset)
     line_h = item_font.get_height() + 8
     bottom = y + h - pad
     summary = tracker.get("summary") or []
