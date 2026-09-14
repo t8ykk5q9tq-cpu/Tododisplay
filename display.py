@@ -29,6 +29,7 @@ SLEEP_FILE = os.path.join(BASE_DIR, "sleep_log.json")
 WATER_FILE = os.path.join(BASE_DIR, "water_log.json")
 METRIC_FILE = os.path.join(BASE_DIR, "metric_log.json")
 JOURNAL_FILE = os.path.join(BASE_DIR, "journal_log.json")
+USAGE_MIN_FILE = os.path.join(BASE_DIR, "usage_minutes.json")
 WATER_GOAL = int(os.environ.get("WATER_GOAL", "3"))
 METRIC_LABEL = os.environ.get("METRIC_LABEL", "Weight")
 METRIC_UNIT = os.environ.get("METRIC_UNIT", "lb")
@@ -411,6 +412,19 @@ def read_journal_today():
             return str(json.load(f).get(today, "") or "")
     except (OSError, json.JSONDecodeError):
         return ""
+
+
+def read_usage_today():
+    """Return today's {minute_of_day(int): app} phone-usage map, or {}."""
+    today = datetime.now().date().isoformat()
+    try:
+        with open(USAGE_MIN_FILE) as f:
+            day = json.load(f).get(today, {})
+        if isinstance(day, list):     # legacy format: bare minute list
+            return {int(m): "" for m in day}
+        return {int(k): v for k, v in day.items()}
+    except (OSError, json.JSONDecodeError, ValueError, AttributeError):
+        return {}
 
 
 # Health data lives in the tracker process (port 5050). Fetch it over localhost
@@ -1021,6 +1035,52 @@ def draw_health(screen, fonts, rect, health):
         draw_stat(4, "MOOD", "--")
 
 
+def draw_usage_pies(screen, fonts, rect, usage_map):
+    """Draw the last 5 hours of phone usage as 5 clock-pies (60 minute wedges
+    each), red where that minute was used. `usage_map` is {minute_of_day: app}."""
+    import math
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
+    pad = 16
+    lab_font = fonts["tiny"]
+
+    now = datetime.now()
+    cur_hour = now.hour
+    hours = [(cur_hour - i) % 24 for i in range(4, -1, -1)]  # oldest -> current
+
+    n = len(hours)
+    cell_w = (w - 2 * pad) // n
+    label_h = lab_font.get_height() + 4
+    radius = min(cell_w, h - 2 * pad - label_h) // 2 - 4
+    cy = y + pad + radius
+    used_col = (233, 69, 96)      # red
+    idle_col = (36, 48, 74)       # dim slate
+
+    for i, hr in enumerate(hours):
+        cx = x + pad + i * cell_w + cell_w // 2
+        base = hr * 60
+        # 60 minute wedges, minute 0 at top (12 o'clock), clockwise.
+        for m in range(60):
+            used = (base + m) in usage_map
+            col = used_col if used else idle_col
+            a0 = (m / 60) * 2 * math.pi - math.pi / 2
+            a1 = ((m + 1) / 60) * 2 * math.pi - math.pi / 2
+            pts = [(cx, cy)]
+            steps = 3
+            for s in range(steps + 1):
+                a = a0 + (a1 - a0) * (s / steps)
+                pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
+            pygame.draw.polygon(screen, col, pts)
+        # thin hub + outline for a clean look
+        pygame.draw.circle(screen, PANEL_COLOR, (cx, cy), max(3, radius // 6))
+        pygame.draw.circle(screen, (60, 70, 100), (cx, cy), radius, 1)
+        # hour label (e.g. "2pm")
+        ampm = "am" if hr < 12 else "pm"
+        disp = hr % 12 or 12
+        lbl = lab_font.render(f"{disp}{ampm}", True, DONE_COLOR)
+        screen.blit(lbl, (cx - lbl.get_width() // 2, cy + radius + 4))
+
+
 def draw_tracker(screen, fonts, rect, tracker):
     """Draw the time-tracker band: next check-in countdown + recent check-ins."""
     x, y, w, h = rect
@@ -1187,6 +1247,7 @@ def main():
     focus_text = ""
     journal_text = ""
     health_data_val = None
+    usage_map = {}
     update_str = last_update_str()
     ram_str = ram_usage_str()
 
@@ -1210,6 +1271,7 @@ def main():
             focus_text = read_focus()
             journal_text = read_journal_today()
             health_data_val = read_health()
+            usage_map = read_usage_today()
             update_str = last_update_str()
             ram_str = ram_usage_str()
             last_tick = now
@@ -1375,12 +1437,19 @@ def main():
                         + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
                         + 2 * 20)                             # top+bottom padding
 
+        # Usage-pies card (last 5 hours of phone use) — sits under the habits.
+        usage_h = 0
+        if usage_map:
+            # A row of 5 small clock pies + an hour label under each.
+            usage_h = int(min(sw, sh) // 7) + fonts["tiny"].get_height() + 4 + 2 * 16
+
         # Side-by-side full-height columns: Todo left, Shopping right. Their
-        # height shrinks to leave room for the health band, habit row,
-        # tracker band + clock.
+        # height shrinks to leave room for the health band, habit row, usage
+        # pies, tracker band + clock.
         below = clock_h
         below += (health_h + gap) if health_h else 0
         below += (habits_h + gap) if habits_h else 0
+        below += (usage_h + gap) if usage_h else 0
         below += (tracker_h + gap) if tracker_h else 0
         panel_w = (sw - 2 * margin - gap) // 2
         panel_h = sh - top - margin - below
@@ -1409,6 +1478,10 @@ def main():
             draw_habits(canvas, fonts,
                         (margin, cursor_y, sw - 2 * margin, habits_h), habits_data)
             cursor_y += habits_h + gap
+        if usage_h:
+            draw_usage_pies(canvas, fonts,
+                            (margin, cursor_y, sw - 2 * margin, usage_h), usage_map)
+            cursor_y += usage_h + gap
         if tracker_data is not None:
             band_w = sw - 2 * margin
             # Split the band: tracker on the left, App Opens box on the right.
