@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e; color: #eaeaea; min-height: 100vh; padding: 20px;
+        }
+        header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+        h1 { color: #00d4ff; font-size: 1.6rem; }
+        .sub { color: #8a8a9a; font-size: 0.9rem; }
+        .grid { display: grid; gap: 16px; grid-template-columns: repeat(2, 1fr); }
+        @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+        .card {
+            background: #16213e; border-radius: 16px; padding: 20px;
+            display: flex; flex-direction: column;
+        }
+        .card h2 { color: #00d4ff; font-size: 1rem; margin-bottom: 12px; font-weight: 600; }
+        .big { font-size: 2.6rem; font-weight: 700; line-height: 1; }
+        .big .unit { font-size: 1rem; color: #8a8a9a; font-weight: 400; margin-left: 6px; }
+        .goal { color: #8a8a9a; font-size: 0.9rem; margin-top: 4px; }
+        .bar-track { height: 14px; border-radius: 7px; background: #0f3460; overflow: hidden; margin-top: 14px; }
+        .bar-fill { height: 100%; background: #00d4ff; transition: width 0.4s; border-radius: 7px; }
+        .bar-fill.full { background: #2ecc71; }
+        .goodtxt { color: #2ecc71; }
+        .sleep-times { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+        .sleep-times .t { text-align: center; }
+        .sleep-times .t .lab { color: #8a8a9a; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .sleep-times .t .val { font-size: 1.5rem; font-weight: 600; }
+        .sleep-times .arrow { color: #6a6a78; font-size: 1.4rem; }
+        .accent { color: #00d4ff; }
+        .empty { color: #8a8a9a; font-style: italic; }
+        .banner {
+            background: #16213e; border-radius: 14px; padding: 20px; text-align: center;
+            color: #8a8a9a;
+        }
+        .banner code { color: #eaeaea; background: #0f3460; padding: 2px 6px; border-radius: 5px; }
+        .net { color: #6a6a78; font-size: 0.85rem; margin-top: 18px; text-align: center; }
+        .updated { color: #6a6a78; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Health</h1>
+            <div class="sub">Fitbit &middot; Google Health</div>
+        </div>
+        <div class="updated" id="updated"></div>
+    </header>
+
+    <div id="content"></div>
+    <div class="net" id="net"></div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function fmtTime(iso) {
+            const d = new Date(iso);
+            return isNaN(d) ? "--" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        function fmtDur(min) {
+            if (min == null) return "--";
+            const h = Math.floor(min / 60), m = min % 60;
+            return h ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function card(title, inner) {
+            return `<div class="card"><h2>${title}</h2>${inner}</div>`;
+        }
+
+        function stepsCard(h) {
+            if (h.steps == null) return card("Steps", '<div class="empty">No data yet today</div>');
+            const goal = h.steps_goal || 10000;
+            const pct = Math.min(100, Math.round((h.steps / goal) * 100));
+            const full = h.steps >= goal;
+            return card("Steps",
+                `<div class="big">${h.steps.toLocaleString()}<span class="unit">steps</span></div>` +
+                `<div class="goal">Goal ${goal.toLocaleString()} &middot; ${pct}%</div>` +
+                `<div class="bar-track"><div class="bar-fill ${full ? "full" : ""}" style="width:${pct}%"></div></div>` +
+                (full ? '<div class="goal goodtxt">Goal reached \u2713</div>' : ""));
+        }
+
+        function sleepCard(h) {
+            const s = h.sleep;
+            if (!s) return card("Sleep", '<div class="empty">No sleep recorded</div>');
+            return card("Sleep",
+                `<div class="big">${fmtDur(s.duration_min)}<span class="unit">last night</span></div>` +
+                `<div class="sleep-times">` +
+                    `<div class="t"><div class="lab">Bed</div><div class="val accent">${fmtTime(s.bedtime)}</div></div>` +
+                    `<div class="arrow">\u2192</div>` +
+                    `<div class="t"><div class="lab">Wake</div><div class="val accent">${fmtTime(s.waketime)}</div></div>` +
+                `</div>`);
+        }
+
+        function statCard(title, value, unit) {
+            if (value == null) return card(title, '<div class="empty">No data yet</div>');
+            return card(title, `<div class="big">${value}<span class="unit">${unit}</span></div>`);
+        }
+
+        async function refresh() {
+            let d;
+            try {
+                d = await (await fetch("/health-data", { cache: "no-store" })).json();
+                $("net").textContent = "";
+            } catch (e) {
+                $("net").textContent = "Offline - retrying...";
+                return;
+            }
+
+            if (!d.enabled) {
+                $("content").innerHTML =
+                    '<div class="banner">Health integration is not configured.<br>' +
+                    'Add your <code>GOOGLE_HEALTH_*</code> credentials to <code>tracker_config.py</code> and restart.</div>';
+                $("updated").textContent = "";
+                return;
+            }
+
+            $("content").innerHTML =
+                '<div class="grid">' +
+                stepsCard(d) +
+                sleepCard(d) +
+                statCard("Resting Heart Rate", d.resting_hr, "bpm") +
+                statCard("Active Minutes", d.active_minutes, "min") +
+                '</div>';
+
+            $("updated").textContent = "Updated " +
+                new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+
+        setInterval(refresh, 60000);
+        refresh();
+    </script>
+</body>
+</html>

@@ -637,6 +637,12 @@ def usage_page():
     return render_template("usage.html")
 
 
+@app.route("/health")
+def health_page():
+    """Dedicated health dashboard (Fitbit/Google Health data)."""
+    return render_template("health.html")
+
+
 # Distinct colors per tracked app for the usage clock. Unknown/older entries
 # (recorded before per-app tracking) fall back to USAGE_DEFAULT_COLOR.
 USAGE_APP_COLORS = {
