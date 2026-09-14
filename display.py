@@ -1452,9 +1452,15 @@ def main():
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
-        # Health band (steps/sleep/HR/active) — one row of stat columns, no title.
+        # Health band (steps/sleep/water/active/mood) — one row of stat columns.
+        # Show it as soon as EITHER Google health data OR local tracker data
+        # (water/mood) is available, so it doesn't "pop in" a few seconds after
+        # the slow first /health-data fetch completes.
+        show_health = bool(health_data_val) or (
+            tracker_data is not None
+            and (tracker_data.get("water") or tracker_data.get("mood")))
         health_h = 0
-        if health_data_val:
+        if show_health:
             health_h = (fonts["tiny"].get_height() + 6        # label row
                         + fonts["clock"].get_height() + 8     # value row (big)
                         + max(fonts["tiny"].get_height(), 12) # third line (bar/sub)
@@ -1489,9 +1495,10 @@ def main():
         # Stack below the lists: health band, habit row, then time-tracker band.
         cursor_y = top + panel_h + gap
         if health_h:
-            # Merge today's water (from the tracker data) into the health dict
-            # so the band can show it in place of resting HR.
-            hd = dict(health_data_val)
+            # Start from Google health data if it's arrived (steps/sleep/active);
+            # otherwise an empty dict so those show "--" until the fetch lands.
+            # Water/mood come from local tracker data and appear immediately.
+            hd = dict(health_data_val) if health_data_val else {}
             if tracker_data is not None:
                 if tracker_data.get("water"):
                     hd["water"] = tracker_data["water"]
