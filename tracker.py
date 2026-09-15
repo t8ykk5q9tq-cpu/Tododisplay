@@ -1906,7 +1906,8 @@ def weekly_review_push_thread():
 # Files worth backing up: all runtime logs/state plus the lists database.
 BACKUP_FILES = [
     LOG_FILE, STATE_FILE, APPUSE_FILE, MOOD_FILE, SLEEP_FILE,
-    WATER_FILE, METRIC_FILE, COMPLIANCE_FILE, DB_PATH,
+    WATER_FILE, METRIC_FILE, JOURNAL_FILE, COMPLIANCE_FILE,
+    USAGE_MIN_FILE, MAC_USAGE_MIN_FILE, DB_PATH,
 ]
 
 
