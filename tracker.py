@@ -542,34 +542,60 @@ def health_data(force=False, day=None):
     return result
 
 
-def load_log():
-    if os.path.exists(LOG_FILE):
+def _atomic_write_json(path, data, indent=None):
+    """Write JSON safely: to a temp file in the same dir, then atomically
+    rename over the target. A crash/power-loss mid-write can't truncate or
+    empty the real file -- either the old or the new complete file survives."""
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)          # atomic on the same filesystem
+    except OSError as e:
+        print(f"atomic write failed for {path}: {e}")
         try:
-            with open(LOG_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return []
-    return []
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _safe_load_json(path, default):
+    """Load JSON, but if the file exists and is UNPARSEABLE, preserve it by
+    renaming to <path>.corrupt instead of silently returning `default` (which
+    a caller would then save back, destroying the data). Only a genuinely
+    missing file returns the default."""
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        # Don't lose the bytes: quarantine the bad file for inspection.
+        try:
+            os.replace(path, path + ".corrupt")
+            print(f"WARNING: {path} was unreadable ({e}); moved to .corrupt")
+        except OSError:
+            pass
+        return default
+
+
+def load_log():
+    return _safe_load_json(LOG_FILE, [])
 
 
 def save_log(entries):
-    with open(LOG_FILE, "w") as f:
-        json.dump(entries, f, indent=2)
+    _atomic_write_json(LOG_FILE, entries, indent=2)
 
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"is_awake": True}
+    return _safe_load_json(STATE_FILE, {"is_awake": True})
 
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+    _atomic_write_json(STATE_FILE, state)
 
 
 def persist_runtime_state():
@@ -937,18 +963,11 @@ MAX_SESSION_SEC = 2 * 60 * 60  # a single sitting caps here; a session left
 
 
 def load_appuse():
-    if os.path.exists(APPUSE_FILE):
-        try:
-            with open(APPUSE_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"open": {}, "totals": {}}
+    return _safe_load_json(APPUSE_FILE, {"open": {}, "totals": {}})
 
 
 def save_appuse(data):
-    with open(APPUSE_FILE, "w") as f:
-        json.dump(data, f)
+    _atomic_write_json(APPUSE_FILE, data)
 
 
 def _tiny_page(msg):
@@ -971,18 +990,11 @@ def normalize_app_name(raw):
 
 def load_usage_minutes(path=USAGE_MIN_FILE):
     """Return {'YYYY-MM-DD': {minute: app}} for the given usage-minutes file."""
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    return _safe_load_json(path, {})
 
 
 def save_usage_minutes(data, path=USAGE_MIN_FILE):
-    with open(path, "w") as f:
-        json.dump(data, f)
+    _atomic_write_json(path, data)
 
 
 def mark_usage_minute(app, when=None, path=USAGE_MIN_FILE):
@@ -1190,13 +1202,7 @@ def active_batch():
 
 
 def load_moods():
-    if os.path.exists(MOOD_FILE):
-        try:
-            with open(MOOD_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return []
+    return _safe_load_json(MOOD_FILE, [])
 
 
 def moods_today():
@@ -1220,25 +1226,17 @@ def log_mood():
         return jsonify({"error": "value must be 1-5"}), 400
     moods = load_moods()
     moods.append({"timestamp": datetime.now().isoformat(), "value": value})
-    with open(MOOD_FILE, "w") as f:
-        json.dump(moods, f)
+    _atomic_write_json(MOOD_FILE, moods)
     return jsonify({"status": "ok", "value": value})
 
 
 def load_water():
     """Return {'YYYY-MM-DD': bottles} dict (bottles may be fractional)."""
-    if os.path.exists(WATER_FILE):
-        try:
-            with open(WATER_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    return _safe_load_json(WATER_FILE, {})
 
 
 def save_water(data):
-    with open(WATER_FILE, "w") as f:
-        json.dump(data, f)
+    _atomic_write_json(WATER_FILE, data)
 
 
 def water_today():
@@ -1270,13 +1268,7 @@ def log_water():
 
 
 def load_metric():
-    if os.path.exists(METRIC_FILE):
-        try:
-            with open(METRIC_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return []
+    return _safe_load_json(METRIC_FILE, [])
 
 
 def metric_recent(days=30):
@@ -1318,20 +1310,13 @@ def log_metric():
                     "timestamp": datetime.now().isoformat()})
     if len(entries) > 1000:
         entries = entries[-1000:]
-    with open(METRIC_FILE, "w") as f:
-        json.dump(entries, f)
+    _atomic_write_json(METRIC_FILE, entries)
     return jsonify(metric_recent())
 
 
 def load_journal():
     """Return {'YYYY-MM-DD': 'text'} of one-line-a-day entries."""
-    if os.path.exists(JOURNAL_FILE):
-        try:
-            with open(JOURNAL_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    return _safe_load_json(JOURNAL_FILE, {})
 
 
 def journal_recent(days=7):
@@ -1359,19 +1344,12 @@ def journal():
             data[today] = text
         else:
             data.pop(today, None)  # empty text clears today's entry
-        with open(JOURNAL_FILE, "w") as f:
-            json.dump(data, f)
+        _atomic_write_json(JOURNAL_FILE, data)
     return jsonify(journal_recent())
 
 
 def load_sleep():
-    if os.path.exists(SLEEP_FILE):
-        try:
-            with open(SLEEP_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return []
+    return _safe_load_json(SLEEP_FILE, [])
 
 
 def record_sleep_event(kind):
@@ -1381,8 +1359,7 @@ def record_sleep_event(kind):
     # keep it bounded (last ~90 days of events is plenty)
     if len(events) > 2000:
         events = events[-2000:]
-    with open(SLEEP_FILE, "w") as f:
-        json.dump(events, f)
+    _atomic_write_json(SLEEP_FILE, events)
 
 
 def import_fitbit_sleep():
@@ -1422,8 +1399,7 @@ def import_fitbit_sleep():
     events.sort(key=lambda e: e.get("timestamp", ""))
     if len(events) > 2000:
         events = events[-2000:]
-    with open(SLEEP_FILE, "w") as f:
-        json.dump(events, f)
+    _atomic_write_json(SLEEP_FILE, events)
     return True
 
 
@@ -1553,18 +1529,11 @@ COMPLIANCE_FILE = os.path.join(BASE_DIR, "compliance.json")
 
 
 def load_compliance_state():
-    if os.path.exists(COMPLIANCE_FILE):
-        try:
-            with open(COMPLIANCE_FILE) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"streak": 0, "last_eval_day": None}
+    return _safe_load_json(COMPLIANCE_FILE, {"streak": 0, "last_eval_day": None})
 
 
 def save_compliance_state(s):
-    with open(COMPLIANCE_FILE, "w") as f:
-        json.dump(s, f)
+    _atomic_write_json(COMPLIANCE_FILE, s)
 
 
 def compliance_streak():
