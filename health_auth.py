@@ -31,6 +31,17 @@ AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
 
+def _extract_code(pasted):
+    """Accept either a bare code or the full redirect URL/query string and
+    return just the auth code (the value of `code`, before any `&scope`)."""
+    pasted = pasted.strip()
+    if "code=" in pasted:
+        # Pull the code= value out of a URL or query string.
+        after = pasted.split("code=", 1)[1]
+        pasted = after.split("&", 1)[0]
+    return urllib.parse.unquote(pasted)
+
+
 def main():
     print("=== Google Health API auth helper ===\n")
     client_id = input("Client ID: ").strip()
@@ -53,9 +64,8 @@ def main():
     print("\n2) You'll be redirected to https://www.google.com/?code=...")
     print("   Copy the value of `code` from the address bar.\n")
 
-    code = input("Paste the code here: ").strip()
-    # Google sometimes URL-encodes the code (e.g. %2F); decode just in case.
-    code = urllib.parse.unquote(code)
+    pasted = input("Paste the code (or the whole redirect URL) here: ").strip()
+    code = _extract_code(pasted)
     client_secret = input("Client Secret: ").strip()
 
     # 3) Exchange the code for tokens.
