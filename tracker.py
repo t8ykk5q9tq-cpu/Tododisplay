@@ -574,11 +574,28 @@ def _safe_load_json(path, default):
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         # Don't lose the bytes: quarantine the bad file for inspection.
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        name = os.path.basename(path)
+        quarantined = False
         try:
             os.replace(path, path + ".corrupt")
-            print(f"WARNING: {path} was unreadable ({e}); moved to .corrupt")
+            quarantined = True
         except OSError:
             pass
+        # Timestamped log line so a future incident is dated, not guessed.
+        print(f"{ts} WARNING: {name} was unreadable ({e}); "
+              f"{'moved to ' + name + '.corrupt' if quarantined else 'could not quarantine'}. "
+              f"Returned default to avoid overwriting it.")
+        # Push an alert so you know the instant it happens.
+        try:
+            send_pushover(
+                f"{name} was unreadable and moved to {name}.corrupt at {ts}. "
+                f"Error: {e}. Data was NOT overwritten -- check the .corrupt file.",
+                title="Tracker: data file quarantined",
+                priority=1,
+            )
+        except Exception:
+            pass  # never let alerting break a load
         return default
 
 
