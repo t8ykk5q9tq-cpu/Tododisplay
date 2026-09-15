@@ -957,9 +957,11 @@ def quick_log():
 # Fire /appstart?app=TikTok when the app opens, /appstop?app=TikTok when it
 # closes. The server computes the duration and tallies today's total per app.
 # Structure: {"open": {"TikTok": <start_epoch>}, "totals": {"YYYY-MM-DD": {"TikTok": seconds}}}
-MAX_SESSION_SEC = 2 * 60 * 60  # a single sitting caps here; a session left
+MAX_SESSION_SEC = int(getattr(cfg, "MAX_SESSION_HOURS", 3) * 60 * 60)
+#                                a single sitting caps here; a session left
 #                                open longer than this is auto-closed by the
 #                                minute-crediting thread (forgotten /appstop).
+#                                Override with MAX_SESSION_HOURS in the config.
 
 
 def load_appuse():
