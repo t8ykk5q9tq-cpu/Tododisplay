@@ -61,6 +61,16 @@ WEEKLY_REVIEW_HOUR = 19        # 7pm
 BACKUP_HOUR = 3                # 3am
 BACKUP_KEEP = 14               # keep two weeks of daily snapshots
 
+# --- Off-device backup (mirror backups/ to another machine) ---
+# After each nightly snapshot, the Pi rsyncs its backups/ folder to this
+# destination (user@host:/path) so a dead SD card can't take the live data
+# AND its local backups together. Point it at your Mac over Tailscale.
+# Leave blank to disable. Requires passwordless SSH from the Pi to the Mac
+# (ssh-keygen on the Pi + ssh-copy-id to the Mac) and "Remote Login" enabled
+# on the Mac. Example:
+#   OFFSITE_BACKUP_DEST = "matthewlabuzzetta@100.102.96.42:/Users/matthewlabuzzetta/tododisplay-backups"
+OFFSITE_BACKUP_DEST = ""
+
 # --- Bedtime wind-down nudge ---
 # When it's within this many minutes before your average bedtime (learned from
 # logged sleep) and you're in a distraction app, get one "wind down" Pushover

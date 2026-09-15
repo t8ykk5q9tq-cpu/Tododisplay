@@ -16,6 +16,7 @@ import os
 import shutil
 import smtplib
 import sqlite3
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -101,6 +102,11 @@ WEEKLY_REVIEW_HOUR = int(getattr(cfg, "WEEKLY_REVIEW_HOUR", 19))
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 BACKUP_HOUR = int(getattr(cfg, "BACKUP_HOUR", 3))
 BACKUP_KEEP = int(getattr(cfg, "BACKUP_KEEP", 14))
+# Off-device backup: after each nightly snapshot, mirror backups/ to another
+# machine (e.g. your Mac over Tailscale) via offsite-backup.sh, so a dead SD
+# card can't take the live data AND its local backups together. Set
+# OFFSITE_BACKUP_DEST to "user@host:/path"; leave blank to disable.
+OFFSITE_BACKUP_DEST = getattr(cfg, "OFFSITE_BACKUP_DEST", "")
 
 # Bedtime wind-down nudge: when it's within WINDDOWN_WINDOW_MIN before your
 # average bedtime (learned from sleep data) and you're in a distraction app,
@@ -1960,7 +1966,40 @@ def run_backup():
             shutil.rmtree(os.path.join(BACKUP_DIR, old), ignore_errors=True)
     except OSError:
         pass
+    _run_offsite_backup()
     return dest
+
+
+def _run_offsite_backup():
+    """Mirror backups/ off-device via offsite-backup.sh, if configured. Runs
+    best-effort with a timeout so it can never hang or crash the backup thread."""
+    if not OFFSITE_BACKUP_DEST:
+        return
+    script = os.path.join(BASE_DIR, "offsite-backup.sh")
+    if not os.path.exists(script):
+        return
+    try:
+        env = dict(os.environ, OFFSITE_DEST=OFFSITE_BACKUP_DEST)
+        r = subprocess.run(
+            ["bash", script],
+            env=env, capture_output=True, text=True, timeout=300,
+        )
+        out = (r.stdout or "").strip() or (r.stderr or "").strip()
+        if out:
+            print(out)
+        if r.returncode != 0:
+            try:
+                send_pushover(
+                    "Off-device backup failed -- the Pi's backups are NOT "
+                    "mirrored to the Mac. Check SSH/Tailscale.",
+                    title="Tracker: offsite backup failed", priority=1,
+                )
+            except Exception:
+                pass
+    except subprocess.TimeoutExpired:
+        print("offsite-backup: timed out after 300s")
+    except OSError as e:
+        print(f"offsite-backup: could not run ({e})")
 
 
 def backup_thread():
