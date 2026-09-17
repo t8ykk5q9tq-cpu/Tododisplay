@@ -6,6 +6,7 @@
     <title>Board</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #1a1a2e; color: #eaeaea; height: 100vh; overflow: hidden;
@@ -36,13 +37,6 @@
         .col2::-webkit-scrollbar-thumb, .list::-webkit-scrollbar-thumb,
         #mac-week::-webkit-scrollbar-thumb, #checkins::-webkit-scrollbar-thumb {
             background: #2a2f4a; border-radius: 3px;
-        }
-        /* Narrower screens: drop columns so panels stay readable. */
-        @media (max-width: 1100px) {
-            .grid { grid-template-columns: 34% 1fr; }
-        }
-        @media (max-width: 640px) {
-            .grid { grid-template-columns: 1fr; overflow-y: auto; }
         }
         /* Lists column: Todo and Shopping share the height evenly. */
         .lists-col .panel { overflow: hidden; }
@@ -90,6 +84,44 @@
         .jentry { padding: 4px 0; border-top: 1px solid #22284a; font-size: 0.9rem; }
         .jentry:first-child { border-top: none; }
         .jentry .jd { color: #00d4ff; font-size: 0.75rem; margin-right: 6px; }
+
+        /* ================= Responsive (Mac windows + phones) =================
+           On big screens the board stays a fixed, full-height, no-scroll
+           dashboard (the Pi display). Below 1200px we stop cramming everything
+           into one screen height: the PAGE scrolls, columns dissolve, and each
+           panel sizes to its content in a comfortable auto-fill card grid.
+           These rules live last so they override the base layout. */
+        @media (max-width: 1200px) {
+            html, body { height: auto; }
+            body { height: auto; min-height: 100vh; overflow-y: auto; }
+            .grid {
+                display: grid; flex: none; overflow: visible;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                grid-auto-rows: max-content; gap: 14px;
+            }
+            /* Columns become transparent so their panels join the card grid. */
+            .col2 { display: contents; }
+            /* Panels size to content instead of flexing to fill a fixed height. */
+            .panel { flex: none !important; overflow: visible; }
+            .lists-col .panel { overflow: visible; }
+            /* Scrollable lists get a sane cap instead of chasing screen height. */
+            .list, .lists-col .list, #checkins, #mac-week {
+                max-height: 340px; overflow-y: auto;
+            }
+        }
+        /* Phone: single column, larger touch-friendly text, more breathing room. */
+        @media (max-width: 640px) {
+            body { padding: 10px; gap: 10px; }
+            .grid { grid-template-columns: 1fr; gap: 12px; }
+            .bar { flex-wrap: wrap; gap: 8px 12px; }
+            .bar .weather { font-size: 1rem; }
+            .panel { padding: 16px; border-radius: 16px; }
+            .panel h2 { font-size: 1.25rem; margin-bottom: 12px; }
+            .list li, .checkin, .stat-row, .app-row, .habit { font-size: 1.05rem; }
+            .list li { padding: 8px 0; }
+            .habit { padding: 8px 12px; }
+            .list, .lists-col .list, #checkins, #mac-week { max-height: 55vh; }
+        }
     </style>
 </head>
 <body>
