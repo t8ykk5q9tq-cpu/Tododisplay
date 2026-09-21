@@ -1915,6 +1915,155 @@ def weekly_review_page():
     return render_template("weekly-review.html")
 
 
+def _pearson(xs, ys):
+    """Correlation coefficient for two equal-length numeric lists, or None if
+    there isn't enough varied data to be meaningful."""
+    pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+    n = len(pairs)
+    if n < 4:
+        return None
+    sx = sum(p[0] for p in pairs)
+    sy = sum(p[1] for p in pairs)
+    mx, my = sx / n, sy / n
+    num = sum((p[0] - mx) * (p[1] - my) for p in pairs)
+    dx = sum((p[0] - mx) ** 2 for p in pairs)
+    dy = sum((p[1] - my) ** 2 for p in pairs)
+    if dx <= 0 or dy <= 0:
+        return None
+    return num / math.sqrt(dx * dy)
+
+
+def _delta(cur, prev):
+    """Return {cur, prev, change, pct} for two numbers (prev may be 0/None)."""
+    cur = cur or 0
+    prev = prev or 0
+    change = round(cur - prev, 2)
+    pct = round((change / prev) * 100) if prev else None
+    return {"cur": cur, "prev": prev, "change": change, "pct": pct}
+
+
+def insights_data():
+    """Cross-reference the last 30 days of tracked data into plain-English
+    findings plus this-week-vs-last-week deltas. Reuses weekly_review_data."""
+    # 30-day per-day series for correlations; slice the tail for deltas.
+    d30 = weekly_review_data(30)
+    days = d30["days"]
+    n = len(days)
+
+    def tail(series, k):
+        s = series or []
+        s = s + [0] * (n - len(s)) if len(s) < n else s
+        return s[-k:]
+
+    # --- Week-over-week deltas (last 7 days vs the 7 before that) ---
+    def wow(series, agg=sum):
+        s = series or [0] * n
+        s = s + [0] * (n - len(s)) if len(s) < n else s
+        cur = agg(s[-7:]) if len(s) >= 7 else agg(s)
+        prev = agg(s[-14:-7]) if len(s) >= 14 else 0
+        return _delta(round(cur, 2), round(prev, 2))
+
+    def avg_nonzero(vals):
+        v = [x for x in vals if x]
+        return round(sum(v) / len(v), 2) if v else 0
+
+    deltas = {
+        "phone_min": wow(d30["usage"]["phone_min"]),
+        "mac_min": wow(d30["usage"]["mac_min"]),
+        "focus_sec": wow(d30["focus"]["focus_by_day"]),
+        "distraction_sec": wow(d30["focus"]["distraction_by_day"]),
+        "sleep_min": wow(d30["sleep"]["series_min"], agg=avg_nonzero),
+        "mood": wow(d30["mood"]["series"], agg=avg_nonzero),
+        "water": wow(d30["water"]["series"]),
+        "steps": wow(d30["steps"]["series"] or [0] * n, agg=avg_nonzero),
+    }
+
+    # --- Correlations / findings over the 30-day window ---
+    findings = []
+    mood = d30["mood"]["series"]
+    phone = d30["usage"]["phone_min"]
+    focus = d30["focus"]["focus_by_day"]
+    distraction = d30["focus"]["distraction_by_day"]
+    sleep_min = d30["sleep"]["series_min"]
+    water = d30["water"]["series"]
+    goal = d30["water"]["goal"]
+
+    def add(text, tone):
+        findings.append({"text": text, "tone": tone})
+
+    # Mood on water-goal days vs other days.
+    hit_moods = [mood[i] for i in range(n) if water[i] >= goal and mood[i]]
+    miss_moods = [mood[i] for i in range(n) if water[i] < goal and mood[i]]
+    if len(hit_moods) >= 2 and len(miss_moods) >= 2:
+        hm = sum(hit_moods) / len(hit_moods)
+        mm = sum(miss_moods) / len(miss_moods)
+        if abs(hm - mm) >= 0.3:
+            better = hm > mm
+            add(f"Your mood averages {hm:.1f}/5 on days you hit your water goal "
+                f"vs {mm:.1f}/5 when you don't.", "good" if better else "warn")
+
+    # Sleep the night AFTER a high-phone-use day vs a low one.
+    if sum(1 for x in phone if x) >= 6 and sum(1 for x in sleep_min if x) >= 6:
+        pairs = [(phone[i], sleep_min[i + 1]) for i in range(n - 1)
+                 if phone[i] and sleep_min[i + 1]]
+        if len(pairs) >= 5:
+            med = sorted(p[0] for p in pairs)[len(pairs) // 2]
+            hi = [s for p, s in pairs if p > med]
+            lo = [s for p, s in pairs if p <= med]
+            if len(hi) >= 2 and len(lo) >= 2:
+                hs = sum(hi) / len(hi)
+                ls = sum(lo) / len(lo)
+                if abs(hs - ls) >= 20:
+                    add(f"After heavy phone days you sleep about "
+                        f"{abs(hs - ls) / 60:.1f}h "
+                        f"{'less' if hs < ls else 'more'} than after light ones.",
+                        "warn" if hs < ls else "good")
+
+    # Phone use vs mood (same day) correlation.
+    r = _pearson(phone, [m if m else None for m in mood])
+    if r is not None and abs(r) >= 0.35:
+        add(f"More phone time tracks with {'lower' if r < 0 else 'higher'} mood "
+            f"that day.", "warn" if r < 0 else "good")
+
+    # Focus vs distraction balance this week.
+    fsum = sum(focus[-7:])
+    dsum = sum(distraction[-7:])
+    if fsum + dsum > 0:
+        fpct = round(fsum / (fsum + dsum) * 100)
+        add(f"This week you spent {fpct}% of tracked screen time on focus vs "
+            f"{100 - fpct}% on distraction.",
+            "good" if fpct >= 60 else ("warn" if fpct < 40 else "mid"))
+
+    # Sleep regularity note.
+    reg = d30["sleep"].get("bedtime_regularity_min")
+    if reg is not None:
+        add(f"Your bedtime varies by about \u00b1{reg} min "
+            f"({'steady' if reg <= 30 else 'inconsistent'}).",
+            "good" if reg <= 30 else "warn")
+
+    if not findings:
+        add("Not enough logged data yet to spot patterns. Keep logging mood, "
+            "water and sleep for a week or two.", "mid")
+
+    return {
+        "days": days,
+        "deltas": deltas,
+        "findings": findings,
+        "meta": {"nights": d30["sleep"]["nights"],
+                 "has_steps": d30["steps"]["series"] is not None},
+    }
+
+
+@app.route("/insights-data")
+def insights_data_route():
+    return jsonify(insights_data())
+
+
+@app.route("/insights")
+def insights_page():
+    return render_template("insights.html")
+
+
 def weekly_review_push_thread():
     """Send the weekly review once, on WEEKLY_REVIEW_DOW at WEEKLY_REVIEW_HOUR."""
     if WEEKLY_REVIEW_HOUR < 0:

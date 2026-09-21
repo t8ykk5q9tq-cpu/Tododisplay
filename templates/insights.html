@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insights</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e; color: #eaeaea; min-height: 100vh; padding: 20px;
+        }
+        header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+        h1 { color: #00d4ff; font-size: 1.6rem; }
+        .sub { color: #8a8a9a; font-size: 0.9rem; }
+        .updated { color: #6a6a78; font-size: 0.85rem; }
+        .site-nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 16px; }
+        .site-nav a {
+            padding: 0.4rem 0.9rem; border-radius: 999px; background: #16213e;
+            color: #00d4ff; text-decoration: none; font-size: 0.85rem; font-weight: 600;
+            border: 1px solid #22284a;
+        }
+        .site-nav a.active { background: #00d4ff; color: #12122a; border-color: #00d4ff; }
+
+        h2.section { color: #00d4ff; font-size: 1.05rem; margin: 22px 0 10px; }
+
+        /* Findings: plain-English insight cards */
+        .findings { display: flex; flex-direction: column; gap: 10px; }
+        .finding {
+            background: #16213e; border-radius: 14px; padding: 14px 16px;
+            display: flex; align-items: flex-start; gap: 12px; font-size: 1rem; line-height: 1.4;
+            border-left: 4px solid #6a6a78;
+        }
+        .finding.good { border-left-color: #2ecc71; }
+        .finding.warn { border-left-color: #e94560; }
+        .finding.mid  { border-left-color: #f5a623; }
+        .finding .ic { font-size: 1.2rem; flex-shrink: 0; line-height: 1.2; }
+        .finding.good .ic { color: #2ecc71; }
+        .finding.warn .ic { color: #e94560; }
+        .finding.mid  .ic { color: #f5a623; }
+
+        /* Week-over-week delta tiles */
+        .deltas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+        @media (max-width: 820px) { .deltas { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 460px) { .deltas { grid-template-columns: 1fr; } }
+        .dcard { background: #16213e; border-radius: 14px; padding: 16px; }
+        .dcard .lab { color: #8a8a9a; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .dcard .val { font-size: 1.5rem; font-weight: 700; margin-top: 6px; }
+        .dcard .val .u { font-size: 0.85rem; color: #8a8a9a; font-weight: 400; margin-left: 4px; }
+        .chip { display: inline-block; margin-top: 8px; padding: 2px 9px; border-radius: 999px;
+            font-size: 0.78rem; font-weight: 700; background: #243056; color: #8a8a9a; }
+        .chip.better { background: rgba(46,204,113,0.15); color: #2ecc71; }
+        .chip.worse  { background: rgba(233,69,96,0.15); color: #e94560; }
+        .chip.flat   { background: #243056; color: #8a8a9a; }
+        .empty { color: #8a8a9a; font-style: italic; }
+        .net { color: #6a6a78; font-size: 0.85rem; margin-top: 22px; text-align: center; }
+    </style>
+</head>
+<body>
+    <nav class="site-nav" id="site-nav"></nav>
+    <script>
+    (function () {
+        var host = location.hostname, proto = location.protocol;
+        var p5000 = proto + "//" + host + ":5000", p5050 = proto + "//" + host + ":5050";
+        var here = location.port + location.pathname.replace(/\/$/, "");
+        var links = [
+            ["Lists", p5000 + "/", "5000"],
+            ["Board", p5000 + "/board", "5000/board"],
+            ["Tracker", p5050 + "/", "5050"],
+            ["Usage", p5050 + "/usage", "5050/usage"],
+            ["Health", p5050 + "/health", "5050/health"],
+            ["Weekly", p5050 + "/weekly-review", "5050/weekly-review"],
+            ["Insights", p5050 + "/insights", "5050/insights"],
+        ];
+        document.getElementById("site-nav").innerHTML = links.map(function (l) {
+            var active = (here === l[2]) ? " class=\"active\"" : "";
+            return "<a href=\"" + l[1] + "\"" + active + ">" + l[0] + "</a>";
+        }).join("");
+    })();
+    </script>
+
+    <header>
+        <div>
+            <h1>Insights</h1>
+            <div class="sub">Patterns across your last 30 days</div>
+        </div>
+        <div class="updated" id="updated"></div>
+    </header>
+
+    <h2 class="section">What your data says</h2>
+    <div class="findings" id="findings"></div>
+
+    <h2 class="section">This week vs last week</h2>
+    <div class="deltas" id="deltas"></div>
+
+    <div class="net" id="net"></div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function fmtMin(m) {
+            m = Math.round(m);
+            const h = Math.floor(m / 60);
+            return h ? `${h}h ${m % 60}m` : `${m}m`;
+        }
+        function fmtSecHrs(s) { return fmtMin(Math.round(s / 60)); }
+
+        // Per-metric display config. higherBetter drives chip coloring:
+        // for phone/distraction an increase is "worse" (red); for the rest
+        // an increase is "better" (green).
+        const METRICS = [
+            { key: "phone_min",       lab: "Phone use / day",   higherBetter: false, fmt: v => fmtMin(v / 7), unit: "" },
+            { key: "distraction_sec", lab: "Distraction / wk",  higherBetter: false, fmt: v => fmtSecHrs(v),  unit: "" },
+            { key: "focus_sec",       lab: "Focus / wk",        higherBetter: true,  fmt: v => fmtSecHrs(v),  unit: "" },
+            { key: "sleep_min",       lab: "Avg sleep / night", higherBetter: true,  fmt: v => fmtMin(v),     unit: "" },
+            { key: "mood",            lab: "Avg mood",          higherBetter: true,  fmt: v => v.toFixed(1),  unit: "/5" },
+            { key: "water",           lab: "Water / wk",        higherBetter: true,  fmt: v => v.toFixed(0),  unit: " btl" },
+            { key: "steps",           lab: "Avg steps / day",   higherBetter: true,  fmt: v => Math.round(v).toLocaleString(), unit: "" },
+        ];
+
+        function deltaChip(d, higherBetter) {
+            if (!d || d.prev === 0 && d.cur === 0) return '<span class="chip flat">no data</span>';
+            const ch = d.change;
+            if (ch === 0) return '<span class="chip flat">no change</span>';
+            const arrow = ch > 0 ? "\u2191" : "\u2193";
+            const better = (ch > 0) === higherBetter;
+            const cls = better ? "better" : "worse";
+            const pct = d.pct != null ? ` ${Math.abs(d.pct)}%` : "";
+            return `<span class="chip ${cls}">${arrow}${pct}</span>`;
+        }
+
+        function renderDeltas(deltas, hasSteps) {
+            const el = $("deltas");
+            const cards = METRICS.filter(m => m.key !== "steps" || hasSteps).map(m => {
+                const d = deltas[m.key];
+                const cur = d ? d.cur : 0;
+                return `<div class="dcard"><div class="lab">${m.lab}</div>` +
+                    `<div class="val">${m.fmt(cur)}${m.unit ? `<span class="u">${m.unit}</span>` : ""}</div>` +
+                    deltaChip(d, m.higherBetter) + `</div>`;
+            }).join("");
+            el.innerHTML = cards || '<div class="empty">No data yet</div>';
+        }
+
+        function renderFindings(findings) {
+            const el = $("findings");
+            if (!findings || !findings.length) {
+                el.innerHTML = '<div class="empty">No patterns yet</div>'; return;
+            }
+            const icon = { good: "\u2713", warn: "\u26a0", mid: "\u2022" };
+            el.innerHTML = findings.map(f =>
+                `<div class="finding ${f.tone}"><span class="ic">${icon[f.tone] || "\u2022"}</span>` +
+                `<span>${f.text}</span></div>`
+            ).join("");
+        }
+
+        async function refresh() {
+            let d;
+            try { d = await (await fetch("/insights-data", { cache: "no-store" })).json(); }
+            catch (e) { $("net").textContent = "Offline"; return; }
+            $("net").textContent = "";
+            renderFindings(d.findings);
+            renderDeltas(d.deltas, d.meta && d.meta.has_steps);
+            $("updated").textContent = "Updated " +
+                new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+
+        setInterval(refresh, 60000);
+        refresh();
+    </script>
+</body>
+</html>
