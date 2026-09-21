@@ -120,6 +120,10 @@ COMPLIANCE_START_HOUR = int(getattr(cfg, "COMPLIANCE_START_HOUR", 8))
 COMPLIANCE_END_HOUR = int(getattr(cfg, "COMPLIANCE_END_HOUR", 22))
 # You're "behind" if compliance drops below this fraction (0-1).
 COMPLIANCE_BEHIND_BELOW = float(getattr(cfg, "COMPLIANCE_BEHIND_BELOW", 0.7))
+# Send Pushover nags when you're behind on check-ins (and the end-of-day
+# streak result). The board/tracker still SHOW compliance either way; this
+# only controls the phone notifications. Set False to silence them.
+COMPLIANCE_NOTIFY = bool(getattr(cfg, "COMPLIANCE_NOTIFY", False))
 
 # "Close the app" nudge: if a tracked app stays open longer than this many
 # minutes in one sitting, send a Pushover telling you to close it. Re-nudges
@@ -2178,7 +2182,7 @@ def compliance_nag_thread():
         c = compliance_today()
         silent = minutes_since_last_checkin()
 
-        if c["behind"] and is_awake:
+        if COMPLIANCE_NOTIFY and c["behind"] and is_awake:
             interval = nag_interval_for(silent)
             if (time.time() - last_nag) >= interval * 60:
                 missed = c["missed"]
@@ -2217,10 +2221,10 @@ def compliance_nag_thread():
             st["streak"] = st.get("streak", 0) + 1 if met else 0
             st["last_eval_day"] = today
             save_compliance_state(st)
-            if met:
+            if COMPLIANCE_NOTIFY and met:
                 send_pushover(f"Check-in goal met! Compliance streak: {st['streak']} days.",
                               title="Compliance")
-            else:
+            elif COMPLIANCE_NOTIFY and not met:
                 send_pushover(f"Check-in goal missed ({c['percent']}%). Streak reset to 0.",
                               title="Compliance")
         time.sleep(60)

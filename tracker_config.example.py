@@ -81,6 +81,9 @@ WINDDOWN_WINDOW_MIN = 30
 COMPLIANCE_START_HOUR = 8      # start expecting check-ins at this hour
 COMPLIANCE_END_HOUR = 22       # stop expecting after this hour
 COMPLIANCE_BEHIND_BELOW = 0.7  # "behind" when you've done < 70% of expected
+# Send Pushover nags when behind (and the end-of-day streak result). The board
+# still shows compliance either way; this only controls phone notifications.
+COMPLIANCE_NOTIFY = False      # True to re-enable the check-in nag pushes
 
 # --- "Close the app" nudge (anti-doomscroll) ---
 # If a tracked app stays open longer than APP_OPEN_NUDGE_MIN in one sitting,
