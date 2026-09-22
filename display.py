@@ -1511,9 +1511,10 @@ def main():
 
         tracker_h = 0
         if tracker_data is not None:
-            # ~75% taller than the original so more check-ins are visible.
+            # Trimmed from 1.75x to 1.35x so the lifetime distraction card fits
+            # below it (still taller than the original; ~3 check-ins visible).
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
-                             + fonts["clock"].get_height() + 44) * 1.75)
+                             + fonts["clock"].get_height() + 44) * 1.35)
 
         # Lifetime distraction card, drawn under the tracker band. Height =
         # title + big value + small padding. Only shown if there's data.
