@@ -192,6 +192,10 @@
                 <div id="focus-stats"></div>
             </div>
             <div class="panel" style="flex:0 0 auto">
+                <h2>Lifetime Distraction</h2>
+                <div id="lifetime-distraction"></div>
+            </div>
+            <div class="panel" style="flex:0 0 auto">
                 <h2>Sleep</h2>
                 <div id="sleep"></div>
             </div>
@@ -259,6 +263,23 @@
                 `<div class="stat-row"><span class="warn">Distraction</span><span class="warn">${fmtDur(d)}</span></div>` +
                 `<div class="fd-bar"><div style="width:${fpct}%"></div></div>` +
                 (fs.longest_focus_sec ? `<div class="sub">Longest focus streak: ${fmtDur(fs.longest_focus_sec)}</div>` : "");
+        }
+
+        function renderLifetimeDistraction(ld) {
+            const el = $("lifetime-distraction");
+            if (!ld || !ld.total_sec) {
+                el.innerHTML = '<div class="empty">No distraction logged yet</div>'; return;
+            }
+            const apps = (ld.apps || [])
+                .map(a => `<div class="app-row"><span>${a.app}</span>` +
+                    `<span class="app-time">${fmtDur(a.seconds)}</span></div>`).join("");
+            const ctx = ld.days
+                ? `<div class="sub">${fmtDur(ld.total_sec)} across ${ld.days} ` +
+                  `day${ld.days === 1 ? "" : "s"} \u00b7 avg ${fmtDur(ld.avg_sec)}/day</div>`
+                : "";
+            el.innerHTML =
+                `<div class="big"><span class="v">${fmtDur(ld.total_sec)}</span></div>` +
+                ctx + apps;
         }
 
         function renderSleep(sl) {
@@ -457,6 +478,7 @@
                 : '<div class="empty">None today</div>';
 
             renderFocusStats(d.focus_stats);
+            renderLifetimeDistraction(d.lifetime_distraction);
             renderSleep(d.sleep);
             renderMoodComp(d.mood, d.compliance);
             renderWater(d.water);

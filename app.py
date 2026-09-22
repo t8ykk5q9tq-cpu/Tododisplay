@@ -381,6 +381,31 @@ def _board_focus(au, today):
             "longest_focus_sec": longest}
 
 
+def _board_lifetime_distraction(au):
+    """All-time distraction usage summed across every logged day. Returns the
+    grand total, a per-app breakdown, days tracked, and the per-day average
+    (over days that had any distraction). 'Lifetime' spans as far back as the
+    data goes."""
+    totals_by_day = au.get("totals", {})
+    total = 0
+    by_app = {}
+    days_with = 0
+    for _day, apps in totals_by_day.items():
+        day_sec = 0
+        for a, s in apps.items():
+            if _classify_app(a) == "distraction":
+                by_app[a] = by_app.get(a, 0) + s
+                day_sec += s
+        if day_sec > 0:
+            total += day_sec
+            days_with += 1
+    apps = sorted(({"app": a, "seconds": s} for a, s in by_app.items()),
+                  key=lambda r: -r["seconds"])
+    avg = int(total / days_with) if days_with else 0
+    return {"total_sec": total, "apps": apps,
+            "days": days_with, "avg_sec": avg}
+
+
 def _board_mac_week(au):
     """7-day totals for Mac apps (top 5) with per-day breakdown."""
     today = date.today()
@@ -641,6 +666,7 @@ def api_board():
         "apps": apps,
         "weather": weather,
         "focus_stats": _board_focus(au, today),
+        "lifetime_distraction": _board_lifetime_distraction(au),
         "mac_week": _board_mac_week(au),
         "mood": _board_mood(today),
         "compliance": _board_compliance(today, len(todays)),
