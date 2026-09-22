@@ -1553,6 +1553,7 @@ def main():
         below += (usage_h + gap) if usage_h else 0
         below += (mac_usage_h + gap) if mac_usage_h else 0
         below += (tracker_h + gap) if tracker_h else 0
+        below += (ltd_h + gap) if ltd_h else 0
         panel_w = (sw - 2 * margin - gap) // 2
         panel_h = sh - top - margin - below
         draw_panel(canvas, fonts,
