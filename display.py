@@ -914,18 +914,7 @@ def draw_app_opens(screen, fonts, rect, tracker):
             ls_surf = val_font.render(
                 f"Longest focus: {_fmt_hm(fs['longest_focus_sec'])}", True, DONE_COLOR)
             screen.blit(ls_surf, (x + pad, line_y))
-            line_y += val_font.get_height() + 3
-        # Lifetime distraction total (all logged days) + daily average.
-        ld = tracker.get("lifetime_distraction")
-        if ld and ld.get("total_sec"):
-            lt_txt = f"Lifetime distract: {_fmt_hm(ld['total_sec'])}"
-            if ld.get("days"):
-                lt_txt += (f"  ({ld['days']}d, avg {_fmt_hm(ld['avg_sec'])}/day)")
-            lt_surf = val_font.render(lt_txt, True, (233, 69, 96))
-            screen.blit(lt_surf, (x + pad, line_y))
             line_y += val_font.get_height() + 8
-        else:
-            line_y += 5
 
     # --- Today's per-app time (name, then time + opens) ---
     app_opens = tracker.get("app_opens", [])
@@ -1137,6 +1126,40 @@ def draw_usage_pies(screen, fonts, rect, usage_map,
         hm += 60
     now_lbl = lab_font.render("now", True, DONE_COLOR)
     screen.blit(now_lbl, (bar_x + bar_w - now_lbl.get_width(), ly))
+
+
+def draw_lifetime_distraction(screen, fonts, rect, ld):
+    """Draw the Lifetime Distraction card: big all-time total + context line
+    (days tracked and per-day average). Sits below the time-tracker band."""
+    x, y, w, h = rect
+    pygame.draw.rect(screen, PANEL_COLOR, pygame.Rect(x, y, w, h), border_radius=16)
+    pad = 20
+    title_surf = fonts["tiny"].render("LIFETIME DISTRACTION", True, HEADER_COLOR)
+    screen.blit(title_surf, (x + pad, y + pad))
+
+    total = ld.get("total_sec", 0) if ld else 0
+    val_y = y + pad + title_surf.get_height() + 6
+    if not total:
+        empty = fonts["item"].render("No distraction logged yet", True, DONE_COLOR)
+        screen.blit(empty, (x + pad, val_y))
+        return
+
+    # Big total in distraction red.
+    big = fonts["clock"].render(_fmt_hm(total), True, (233, 69, 96))
+    screen.blit(big, (x + pad, val_y))
+
+    # Context line: N days + daily average, to the right of / under the total.
+    if ld.get("days"):
+        ctx = f"across {ld['days']} day{'' if ld['days'] == 1 else 's'} \u00b7 " \
+              f"avg {_fmt_hm(ld['avg_sec'])}/day"
+        ctx_surf = fonts["tiny"].render(ctx, True, DONE_COLOR)
+        # Place it to the right of the big value if it fits, else under it.
+        bx = x + pad + big.get_width() + 14
+        by = val_y + big.get_height() - ctx_surf.get_height() - 2
+        if bx + ctx_surf.get_width() <= x + w - pad:
+            screen.blit(ctx_surf, (bx, by))
+        else:
+            screen.blit(ctx_surf, (x + pad, val_y + big.get_height() + 2))
 
 
 def draw_tracker(screen, fonts, rect, tracker):
@@ -1492,6 +1515,14 @@ def main():
             tracker_h = int(((fonts["item"].get_height() + 8) * 4
                              + fonts["clock"].get_height() + 44) * 1.75)
 
+        # Lifetime distraction card, drawn under the tracker band. Height =
+        # title + big value + small padding. Only shown if there's data.
+        ltd_h = 0
+        ltd = tracker_data.get("lifetime_distraction") if tracker_data else None
+        if ltd and ltd.get("total_sec"):
+            ltd_h = (fonts["tiny"].get_height() + 6
+                     + fonts["clock"].get_height() + 2 * 20)
+
         # Health band (steps/sleep/water/active/mood) — one row of stat columns.
         # Show it as soon as EITHER Google health data OR local tracker data
         # (water/mood) is available, so it doesn't "pop in" a few seconds after
@@ -1571,6 +1602,14 @@ def main():
             draw_app_opens(canvas, fonts,
                            (margin + tracker_w + gap, cursor_y, apps_w, tracker_h),
                            tracker_data)
+            cursor_y += tracker_h + gap
+            # Lifetime distraction card, full width, under the tracker band.
+            # Only draw if it fits above the bottom quote panel.
+            if ltd_h and cursor_y + ltd_h <= (sh - clock_h):
+                draw_lifetime_distraction(
+                    canvas, fonts,
+                    (margin, cursor_y, sw - 2 * margin, ltd_h), ltd)
+                cursor_y += ltd_h + gap
 
         # Daily Stoic quote in its own panel (above the clock). Stoic quotes can
         # be long, so shrink the font to fit the panel width on one line.
