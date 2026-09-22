@@ -265,6 +265,13 @@
                 (fs.longest_focus_sec ? `<div class="sub">Longest focus streak: ${fmtDur(fs.longest_focus_sec)}</div>` : "");
         }
 
+        function fmtDaysHrs(s) {
+            const hTotal = Math.floor(s / 3600);
+            const d = Math.floor(hTotal / 24), h = hTotal % 24;
+            if (d) return `${d}d ${h}h`;
+            const m = Math.floor((s % 3600) / 60);
+            return h ? `${h}h ${m}m` : `${m}m`;
+        }
         function renderLifetimeDistraction(ld) {
             const el = $("lifetime-distraction");
             if (!ld || !ld.total_sec) {
@@ -274,11 +281,11 @@
                 .map(a => `<div class="app-row"><span>${a.app}</span>` +
                     `<span class="app-time">${fmtDur(a.seconds)}</span></div>`).join("");
             const ctx = ld.days
-                ? `<div class="sub">${fmtDur(ld.total_sec)} across ${ld.days} ` +
+                ? `<div class="sub">across ${ld.days} ` +
                   `day${ld.days === 1 ? "" : "s"} \u00b7 avg ${fmtDur(ld.avg_sec)}/day</div>`
                 : "";
             el.innerHTML =
-                `<div class="big"><span class="v">${fmtDur(ld.total_sec)}</span></div>` +
+                `<div class="big"><span class="v">${fmtDaysHrs(ld.total_sec)}</span></div>` +
                 ctx + apps;
         }
 

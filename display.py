@@ -887,6 +887,17 @@ def _fmt_hm(secs):
     return f"{hh}h {mm}m" if hh else f"{mm}m"
 
 
+def _fmt_dh(secs):
+    """Format seconds as days + hours for large totals (e.g. '2d 5h').
+    Falls back to hours/minutes under a day."""
+    h_total = secs // 3600
+    d, hh = divmod(h_total, 24)
+    if d:
+        return f"{d}d {hh}h"
+    mm = (secs % 3600) // 60
+    return f"{hh}h {mm}m" if hh else f"{mm}m"
+
+
 def draw_app_opens(screen, fonts, rect, tracker):
     """Draw the 'App Time' box: focus/distraction summary, today's per-app time,
     and a compact weekly Mac trend."""
@@ -1144,8 +1155,8 @@ def draw_lifetime_distraction(screen, fonts, rect, ld):
         screen.blit(empty, (x + pad, val_y))
         return
 
-    # Big total in distraction red.
-    big = fonts["clock"].render(_fmt_hm(total), True, (233, 69, 96))
+    # Big total in distraction red (days + hours for large totals).
+    big = fonts["clock"].render(_fmt_dh(total), True, (233, 69, 96))
     screen.blit(big, (x + pad, val_y))
 
     # Context line: N days + daily average, to the right of / under the total.
