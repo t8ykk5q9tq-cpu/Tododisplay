@@ -491,6 +491,7 @@ def read_tracker():
     app_opens = []
     focus_stats = None
     mac_week = []
+    lifetime_distraction = None
     try:
         with open(APPUSE_FILE) as f:
             au = json.load(f)
@@ -519,6 +520,19 @@ def read_tracker():
         focus_stats = {"focus_sec": focus_sec, "distraction_sec": distraction_sec,
                        "longest_focus_sec": longest_focus}
 
+        # Lifetime distraction: sum TikTok/YouTube across every logged day.
+        lt_total = 0
+        lt_days = 0
+        for _dk, _apps in au.get("totals", {}).items():
+            _day_d = sum(s for a, s in _apps.items()
+                         if classify_app(a) == "distraction")
+            if _day_d > 0:
+                lt_total += _day_d
+                lt_days += 1
+        lifetime_distraction = {
+            "total_sec": lt_total, "days": lt_days,
+            "avg_sec": int(lt_total / lt_days) if lt_days else 0}
+
         # Weekly Mac app trend: 7-day totals for Mac apps (top 3).
         from datetime import timedelta
         day_keys = [(datetime.now().date() - timedelta(days=i)).isoformat()
@@ -534,6 +548,7 @@ def read_tracker():
     except (OSError, json.JSONDecodeError):
         focus_stats = None
         mac_week = []
+        lifetime_distraction = None
 
     next_in = None
     is_awake = True
@@ -664,6 +679,7 @@ def read_tracker():
             "summary": summary, "app_opens": app_opens,
             "total_today": total_today,
             "focus_stats": focus_stats, "mac_week": mac_week,
+            "lifetime_distraction": lifetime_distraction,
             "mood": mood, "compliance": compliance, "sleep": sleep,
             "water": water, "metric": metric}
 
@@ -898,7 +914,18 @@ def draw_app_opens(screen, fonts, rect, tracker):
             ls_surf = val_font.render(
                 f"Longest focus: {_fmt_hm(fs['longest_focus_sec'])}", True, DONE_COLOR)
             screen.blit(ls_surf, (x + pad, line_y))
+            line_y += val_font.get_height() + 3
+        # Lifetime distraction total (all logged days) + daily average.
+        ld = tracker.get("lifetime_distraction")
+        if ld and ld.get("total_sec"):
+            lt_txt = f"Lifetime distract: {_fmt_hm(ld['total_sec'])}"
+            if ld.get("days"):
+                lt_txt += (f"  ({ld['days']}d, avg {_fmt_hm(ld['avg_sec'])}/day)")
+            lt_surf = val_font.render(lt_txt, True, (233, 69, 96))
+            screen.blit(lt_surf, (x + pad, line_y))
             line_y += val_font.get_height() + 8
+        else:
+            line_y += 5
 
     # --- Today's per-app time (name, then time + opens) ---
     app_opens = tracker.get("app_opens", [])
